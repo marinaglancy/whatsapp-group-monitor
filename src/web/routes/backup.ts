@@ -5,7 +5,7 @@ import { PassThrough, pipeline as streamPipeline } from 'stream'
 import { promisify } from 'util'
 import { createWriteStream } from 'fs'
 import crypto from 'crypto'
-import archiver from 'archiver'
+import { ZipArchive } from 'archiver'
 import AdmZip from 'adm-zip'
 import Database from 'better-sqlite3'
 import { config } from '../../config.js'
@@ -149,7 +149,7 @@ export function registerBackupRoutes(app: FastifyInstance) {
     reply.header('Content-Disposition', `attachment; filename="backup-${date}.zip"`)
 
     const pass = new PassThrough()
-    const archive = archiver('zip', { zlib: { level: 6 } })
+    const archive = new ZipArchive({ zlib: { level: 6 } })
     archive.pipe(pass)
     archive.on('error', (err) => pass.destroy(err))
 
