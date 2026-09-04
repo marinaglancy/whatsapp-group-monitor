@@ -5,6 +5,7 @@ import type { ActivityEventType, GroupActivityRow } from '../../db/schema.js'
 import { insertActivity } from '../../db/queries/activity.js'
 import { processRecord } from './processor.js'
 import { getSock, getEncryptionContext } from '../client.js'
+import { logger } from '../../utils/logger.js'
 
 /** Convert a value to a JSON-safe object (replace binary, bigint) */
 function safeJson(obj: unknown): unknown {
@@ -212,9 +213,13 @@ export class ActivityRecord {
             })
             decrypted = true
           }
-        } catch {
-          // decryption failed
+        } catch (err) {
+          logger.warn({ err, groupJid, messageId, pollMsgId }, 'Poll vote decryption failed')
         }
+      }
+
+      if (!decrypted) {
+        logger.warn({ groupJid, messageId, pollMsgId, hasContext: !!(pollMsgId && getEncryptionContext(groupJid, pollMsgId)) }, 'Poll vote stored encrypted')
       }
 
       return new ActivityRecord({
@@ -286,9 +291,19 @@ export class ActivityRecord {
             const r = decoded.response
             responseStr = r === 1 ? 'GOING' : r === 2 ? 'NOT_GOING' : r === 3 ? 'MAYBE' : String(r ?? 'UNKNOWN')
           }
-        } catch {
-          // decryption failed
+        } catch (err) {
+          logger.warn({ err, groupJid, messageId, eventMsgId }, 'Event response decryption failed')
         }
+      }
+
+      if (!responseStr) {
+        logger.warn({
+          groupJid,
+          messageId,
+          eventMsgId,
+          hasContext: !!(eventMsgId && getEncryptionContext(groupJid, eventMsgId)),
+          addressingMode: msg.key.addressingMode,
+        }, 'Event response stored encrypted')
       }
 
       return new ActivityRecord({
