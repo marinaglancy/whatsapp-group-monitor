@@ -334,7 +334,7 @@ const executors: Record<string, Executor> = {
       checkRange(from, to)
       return {
         from, to,
-        readersFromDate: to >= todayStart ? formatDateTime(from, ctx.timezone).slice(0, 10) : null,
+        watermarkFromDate: to >= todayStart ? formatDateTime(from, ctx.timezone).slice(0, 10) : null,
       }
     })
     const rows = qActivityStats({ groupJids: jids }, { participantLids, ranges, categories })

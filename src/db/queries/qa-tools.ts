@@ -374,8 +374,8 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
 export interface QaStatsRange {
   from: number
   to: number
-  /** Local 'YYYY-MM-DD' the readers watermark must reach; null = readers not computable (past range). */
-  readersFromDate?: string | null
+  /** Local 'YYYY-MM-DD' the read watermark must reach; null = participants not computable (past range). */
+  watermarkFromDate?: string | null
 }
 
 export interface QaStatsRow {
@@ -389,7 +389,7 @@ export interface QaStatsRow {
   members?: {
     contributors: number
     engagers: number
-    readers?: number
+    participants?: number
     joined: number
     left: number
     total: number
@@ -423,13 +423,13 @@ export function qActivityStats(ctx: QaToolQueryCtx, opts: {
     sum(CASE WHEN base.event_type = 'poll_vote' THEN 1 ELSE 0 END) AS poll_votes,
     sum(CASE WHEN base.event_type = 'event_response' THEN 1 ELSE 0 END) AS event_responses,
     count(DISTINCT CASE WHEN base.event_type IN (${inList(PRIMARY)}) THEN base.user_jid END) AS contributors,
-    count(DISTINCT CASE WHEN base.event_type IN ('poll_vote', 'event_response')
+    count(DISTINCT CASE WHEN base.event_type IN (${inList(PRIMARY)}) OR base.event_type IN ('poll_vote', 'event_response')
       OR (base.event_type = 'reaction' AND json_extract(base.metadata, '$.emoji') IS NOT NULL)
       THEN base.user_jid END) AS engagers,
     sum(CASE WHEN base.event_type = 'member_joined' THEN 1 ELSE 0 END) AS joined_cnt,
     sum(CASE WHEN base.event_type = 'member_left' THEN 1 ELSE 0 END) AS left_cnt`
 
-  function buildRow(groupJid: string, range: QaStatsRange, agg: Record<string, unknown> | undefined, memberTotal: number, readers: number | undefined): QaStatsRow {
+  function buildRow(groupJid: string, range: QaStatsRange, agg: Record<string, unknown> | undefined, memberTotal: number, participants: number | undefined): QaStatsRow {
     const n = (k: string) => Number((agg?.[k] as number | null) ?? 0)
     const counts: QaStatsRow['counts'] = {}
     if (opts.categories.has('primary')) counts.primary = { messages: n('messages'), polls: n('polls'), events: n('events') }
@@ -440,7 +440,7 @@ export function qActivityStats(ctx: QaToolQueryCtx, opts: {
       row.members = {
         contributors: n('contributors'),
         engagers: n('engagers'),
-        ...(readers !== undefined ? { readers } : {}),
+        ...(participants !== undefined ? { participants } : {}),
         joined: n('joined_cnt'),
         left: n('left_cnt'),
         total: memberTotal,
@@ -468,24 +468,31 @@ export function qActivityStats(ctx: QaToolQueryCtx, opts: {
       GROUP BY base.group_jid`)
     const aggByGroup = new Map(perGroup.map(r => [r.group_jid as string, r]))
 
-    const readersByGroup = new Map<string, number>()
-    let readersAll: number | undefined
-    if (includeMembers && range.readersFromDate) {
-      const rrows = db.all<{ group_jid: string; cnt: number }>(sql`
-        SELECT gm.group_jid, count(*) AS cnt FROM group_members gm
+    const participantsByGroup = new Map<string, number>()
+    let participantsAll: number | undefined
+    if (includeMembers && range.watermarkFromDate) {
+      // funnel top: participants = engagers (activity implies presence) UNION the
+      // read-receipt watermark members
+      const readerUnion = sql`
+        SELECT base.group_jid AS gj, base.user_jid AS jid
+        FROM group_activity_log base
+        WHERE base.group_jid IN (${inList(jids)}) AND base.timestamp BETWEEN ${range.from} AND ${range.to}
+          AND (base.event_type IN (${inList([...PRIMARY, 'poll_vote', 'event_response'])})
+            OR (base.event_type = 'reaction' AND json_extract(base.metadata, '$.emoji') IS NOT NULL))${participantCond}
+        UNION
+        SELECT gm.group_jid AS gj, gm.user_jid AS jid FROM group_members gm
         WHERE gm.group_jid IN (${inList(jids)}) AND gm.membership NOT IN ('none')
-          AND gm.last_read_at >= ${range.readersFromDate}${memberParticipantCond}
-        GROUP BY gm.group_jid`)
-      for (const r of rrows) readersByGroup.set(r.group_jid, r.cnt)
-      readersAll = db.get<{ cnt: number }>(sql`
-        SELECT count(DISTINCT gm.user_jid) AS cnt FROM group_members gm
-        WHERE gm.group_jid IN (${inList(jids)}) AND gm.membership NOT IN ('none')
-          AND gm.last_read_at >= ${range.readersFromDate}${memberParticipantCond}`)?.cnt ?? 0
+          AND gm.last_read_at >= ${range.watermarkFromDate}${memberParticipantCond}`
+      const rrows = db.all<{ gj: string; cnt: number }>(sql`
+        SELECT x.gj, count(DISTINCT x.jid) AS cnt FROM (${readerUnion}) x GROUP BY x.gj`)
+      for (const r of rrows) participantsByGroup.set(r.gj, r.cnt)
+      participantsAll = db.get<{ cnt: number }>(sql`
+        SELECT count(DISTINCT x.jid) AS cnt FROM (${readerUnion}) x`)?.cnt ?? 0
     }
 
     for (const jid of jids) {
       out.push(buildRow(jid, range, aggByGroup.get(jid), totalByGroup.get(jid) ?? 0,
-        range.readersFromDate ? (readersByGroup.get(jid) ?? 0) : undefined))
+        range.watermarkFromDate ? (participantsByGroup.get(jid) ?? 0) : undefined))
     }
     if (jids.length > 1) {
       const all = db.get<Record<string, unknown>>(sql`
@@ -493,7 +500,7 @@ export function qActivityStats(ctx: QaToolQueryCtx, opts: {
         FROM group_activity_log base
         WHERE base.group_jid IN (${inList(jids)}) AND base.timestamp BETWEEN ${range.from} AND ${range.to}${participantCond}`)
       out.push(buildRow('total', range, all ?? undefined, distinctTotal,
-        range.readersFromDate ? readersAll : undefined))
+        range.watermarkFromDate ? participantsAll : undefined))
     }
   }
   return out

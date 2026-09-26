@@ -186,7 +186,7 @@ describe('qActivityStats', () => {
     // reaction removals (null emoji) are not activity: 👍(M2) + 👍,👍,❤️(M3) = 4
     expect(r.counts.secondary).toEqual({ reactions: 4, poll_votes: 2, event_responses: 1 })
     expect(r.members!.contributors).toBe(3)
-    expect(r.members!.engagers).toBe(3) // Anna reacted, Boris voted+responded, Carl voted
+    expect(r.members!.engagers).toBe(3) // funnel: anyone with primary OR secondary activity
     expect(r.members!.joined).toBe(1)
     expect(r.members!.left).toBe(1)
     expect(r.members!.total).toBe(3)
@@ -198,9 +198,26 @@ describe('qActivityStats', () => {
       categories: new Set(['primary'] as const),
     })
     expect(rows.map(r => r.groupJid)).toEqual(['a@g.us', 'b@g.us', 'total'])
+    // engagers form a funnel superset of contributors: Anna only POSTED in Beta,
+    // which still makes her an engager there
+    expect(rows[1].members!.contributors).toBe(1)
+    expect(rows[1].members!.engagers).toBe(1)
     const total = rows[2]
     expect(total.counts.primary!.messages).toBe(9) // 8 + 1
     expect(total.members!.contributors).toBe(3) // Anna posts in both groups but counts once
+  })
+
+  it('readers = engagers plus watermark readers, distinct (funnel top)', async () => {
+    const { updateLastReadAt } = await import('../../src/db/queries/members.js')
+    // Carl read the group (receipt watermark) but did nothing in the narrow range
+    updateLastReadAt('a@g.us', CARL, '2026-05-01')
+    const rows = qActivityStats({ groupJids: A }, {
+      ranges: [{ from: 0, to: 1500, watermarkFromDate: '1970-01-01' }], // only M1 (Anna) in range
+      categories: new Set(['primary'] as const),
+    })
+    expect(rows[0].members!.contributors).toBe(1) // Anna
+    expect(rows[0].members!.engagers).toBe(1) // Anna (posting counts as engagement)
+    expect(rows[0].members!.participants).toBe(2) // Anna (inferred from activity) + Carl (watermark)
   })
 
   it('respects ranges and the participant filter', () => {

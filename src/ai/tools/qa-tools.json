@@ -747,15 +747,15 @@
                 "properties": {
                   "contributors": {
                     "type": "integer",
-                    "description": "Distinct members with at least one primary action in the range."
+                    "description": "Distinct members with at least one primary action (message, poll, event) in the range."
                   },
                   "engagers": {
                     "type": "integer",
-                    "description": "Distinct members with at least one secondary action in the range (may overlap contributors)."
+                    "description": "Distinct members with ANY activity in the range — primary or secondary — so engagers is always >= contributors (posting counts as engagement)."
                   },
-                  "readers": {
+                  "participants": {
                     "type": "integer",
-                    "description": "Distinct members who read the group during the range, from read receipts. Approximate — receipts are opt-in and only cover the monitoring account's messages — and only computable when the range extends to the present; absent for past ranges."
+                    "description": "Distinct members observed in the group during the range: engagers plus members whose read receipts show they read it (so participants >= engagers). Approximate — receipts are opt-in and only cover the monitoring account's messages — and only computable when the range extends to the present; absent for past ranges."
                   },
                   "joined": {
                     "type": "integer",

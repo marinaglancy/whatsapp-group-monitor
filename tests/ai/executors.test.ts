@@ -172,6 +172,7 @@ describe('activity_stats', () => {
     expect(a.counts.primary.messages).toBe(2)
     expect(a.counts.secondary.reactions).toBe(1)
     expect(a.members.contributors).toBe(2)
+    expect(a.members.engagers).toBe(2) // funnel: posting counts as engagement
     expect(a.members.total).toBe(2)
   })
 
