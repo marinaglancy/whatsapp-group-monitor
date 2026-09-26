@@ -6,7 +6,7 @@ import { getCurrentQr, getConnectionState, getBotUser } from '../../whatsapp/han
 import { getSock } from '../../whatsapp/client.js'
 import { requireAuth, requireAuthApi, generateCsrf, verifyCsrf } from '../middleware/auth.js'
 import { getSetting, getSettingOrDefault, setSetting } from '../../db/queries/settings.js'
-import { DEFAULT_GEMINI_MODEL, DEFAULT_AI_DAILY_LIMIT, getAiSettings } from '../../ai/settings.js'
+import { DEFAULT_GEMINI_MODEL, DEFAULT_AI_DAILY_LIMIT, getAiSettings, isValidTimezone } from '../../ai/settings.js'
 import { getAllGroups, getGroup, updateGroupQaConfig, QA_INSTRUCTIONS_MAX } from '../../db/queries/groups.js'
 import { GroupRecord } from '../../whatsapp/group/record.js'
 import { isAccountDbReady } from '../../db/account.js'
@@ -95,6 +95,7 @@ export function registerRoutes(app: FastifyInstance) {
       ai_daily_limit: getSettingOrDefault('ai_daily_limit', String(DEFAULT_AI_DAILY_LIMIT)),
       ai_system_prompt: getAiSettings().systemPrompt,
       ai_system_prompt_is_default: !(getSetting('ai_system_prompt') || '').trim(),
+      timezone: getAiSettings().timezone,
     })
   })
 
@@ -103,7 +104,14 @@ export function registerRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: 'Invalid CSRF token' })
     }
     const body = req.body as Record<string, string>
-    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit', 'ai_system_prompt']
+    // timezone is validated before anything is written
+    if ('timezone' in body && typeof body.timezone === 'string') {
+      const tz = body.timezone.trim()
+      if (tz && !isValidTimezone(tz)) {
+        return reply.status(400).send({ error: `Unknown timezone: ${tz}` })
+      }
+    }
+    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit', 'ai_system_prompt', 'timezone']
     for (const key of allowed) {
       if (key in body && typeof body[key] === 'string') {
         setSetting(key, body[key])

@@ -62,6 +62,16 @@ describe('/api/settings AI keys', () => {
     expect(body.ai_daily_limit).toBe('100')
   })
 
+  it('stores a valid timezone and rejects invalid ones', async () => {
+    expect((await get()).json().timezone).toBe('UTC')
+    expect((await post({ timezone: 'Europe/Lisbon' })).statusCode).toBe(200)
+    expect((await get()).json().timezone).toBe('Europe/Lisbon')
+    expect((await post({ timezone: 'Not/AZone' })).statusCode).toBe(400)
+    expect((await get()).json().timezone).toBe('Europe/Lisbon') // unchanged
+    expect((await post({ timezone: '' })).statusCode).toBe(200) // clearing restores default
+    expect((await get()).json().timezone).toBe('UTC')
+  })
+
   it('reports whether the system prompt is the shipped default', async () => {
     expect((await get()).json().ai_system_prompt_is_default).toBe(true)
     await post({ ai_system_prompt: 'You are a pirate.' })
@@ -88,6 +98,7 @@ describe('/api/settings AI keys', () => {
     expect(res.body).toContain('id="gemini_model"')
     expect(res.body).toContain('id="ai_daily_limit"')
     expect(res.body).toContain('id="ai_system_prompt"')
+    expect(res.body).toContain('id="timezone"')
   })
 
   it('rejects a POST without CSRF', async () => {

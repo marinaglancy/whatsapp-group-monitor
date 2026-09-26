@@ -85,6 +85,11 @@
         <label for="ai_daily_limit">Daily AI call limit (0 = unlimited)</label>
         <input type="number" id="ai_daily_limit" name="ai_daily_limit" min="0" />
 
+        <label for="timezone">Timezone</label>
+        <input type="text" id="timezone" name="timezone" list="timezone-list" placeholder="UTC" autocomplete="off" />
+        <datalist id="timezone-list"></datalist>
+        <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">IANA name, e.g. Europe/Lisbon. All dates the bot reads and writes use this timezone. Leave blank for UTC.</p>
+
         <label for="ai_system_prompt">Main system prompt</label>
         <textarea id="ai_system_prompt" name="ai_system_prompt" rows="9"></textarea>
         <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">Sent to the AI before every answer, together with the current date, the linked-group list, and each Q&amp;A group's own additional instructions. Clearing this restores the default.</p>
@@ -108,6 +113,7 @@
         document.getElementById('page_size').value = data.page_size || '50';
         document.getElementById('gemini_model').value = data.gemini_model || '';
         document.getElementById('ai_daily_limit').value = data.ai_daily_limit || '300';
+        document.getElementById('timezone').value = data.timezone === 'UTC' ? '' : (data.timezone || '');
         document.getElementById('ai_system_prompt').value = data.ai_system_prompt || '';
         promptLoaded = data.ai_system_prompt || '';
         promptWasDefault = !!data.ai_system_prompt_is_default;
@@ -147,6 +153,7 @@
           page_size: document.getElementById('page_size').value,
           gemini_model: document.getElementById('gemini_model').value,
           ai_daily_limit: document.getElementById('ai_daily_limit').value,
+          timezone: document.getElementById('timezone').value,
         };
         // Only store the prompt when actually edited: an untouched default stays
         // tracking the shipped default (so future default improvements arrive).
@@ -188,6 +195,15 @@
       el.className = 'msg ' + (ok ? 'msg-ok' : 'msg-err');
       setTimeout(() => { el.textContent = ''; }, 3000);
     }
+
+    try {
+      const list = document.getElementById('timezone-list');
+      for (const tz of Intl.supportedValuesOf('timeZone')) {
+        const opt = document.createElement('option');
+        opt.value = tz;
+        list.appendChild(opt);
+      }
+    } catch (e) { /* datalist stays empty; server still validates */ }
 
     document.addEventListener('statusbar:state', (e) => {
       if (e.detail !== 'open') document.getElementById('back-link').textContent = '\u2190 Back';
