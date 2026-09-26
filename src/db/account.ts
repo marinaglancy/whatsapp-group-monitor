@@ -169,6 +169,26 @@ export function initAccountDb(phone: string) {
     sqlite.exec('ALTER TABLE groups ADD COLUMN description TEXT')
   }
 
+  // Full-text index over message/edit texts (message_search tool). Contentless
+  // FTS5 keyed by group_activity_log.id; created with a one-off backfill, then
+  // maintained by an insert trigger (activity rows are insert-only).
+  const hasFts = !!sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'").get()
+  if (!hasFts) {
+    sqlite.exec(`
+      CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='', tokenize='porter unicode61');
+      INSERT INTO messages_fts(rowid, text)
+        SELECT id, json_extract(metadata, '$.text') FROM group_activity_log
+        WHERE event_type IN ('message', 'edit') AND json_extract(metadata, '$.text') IS NOT NULL;
+    `)
+  }
+  sqlite.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_fts_activity AFTER INSERT ON group_activity_log
+    WHEN new.event_type IN ('message', 'edit') AND json_extract(new.metadata, '$.text') IS NOT NULL
+    BEGIN
+      INSERT INTO messages_fts(rowid, text) VALUES (new.id, json_extract(new.metadata, '$.text'));
+    END;
+  `)
+
   currentPhone = phone
   logger.info({ phone, path: dbPath }, 'Account database initialized')
   return db
