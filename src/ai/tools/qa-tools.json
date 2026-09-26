@@ -1,0 +1,910 @@
+[
+  {
+    "name": "group_list",
+    "_category": "group",
+    "description": "List the groups you can report on, with their communities. Call this first to learn group jids and names.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "group_jids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Only these group/community jids. Omit for all available groups."
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "description",
+              "is_community",
+              "parent_jid",
+              "member_count",
+              "bot_role",
+              "announcement_only",
+              "bot_can_post",
+              "last_activity",
+              "join_approval_required"
+            ]
+          },
+          "description": "Extra fields to include; jid and name are always returned. Omit for no extra fields."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "At most this many groups per page (default 100, maximum 200). This is a hard upper bound: a page may contain fewer rows when they are verbose — always continue from next_offset, not from offset + limit."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Paging offset. Default 0."
+        }
+      }
+    },
+    "responseJsonSchema": {
+      "type": "object",
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "jid": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "is_community": {
+                "type": "boolean"
+              },
+              "parent_jid": {
+                "type": "string",
+                "description": "Jid of the community this group belongs to, absent for top-level."
+              },
+              "member_count": {
+                "type": "integer"
+              },
+              "description": {
+                "type": "string"
+              },
+              "bot_role": {
+                "type": "string",
+                "enum": [
+                  "participant",
+                  "admin",
+                  "superadmin"
+                ],
+                "description": "The bot account's role in the group."
+              },
+              "announcement_only": {
+                "type": "boolean",
+                "description": "True when only admins can post in the group."
+              },
+              "bot_can_post": {
+                "type": "boolean",
+                "description": "True when the bot is able to post in the group (it is not announcement-only, or the bot is an admin)."
+              },
+              "last_activity": {
+                "type": "string",
+                "description": "Datetime of the most recent activity in the group, 'YYYY-MM-DD HH:MM:SS' in the {{timezone}} timezone; absent if none recorded."
+              },
+              "join_approval_required": {
+                "type": "boolean",
+                "description": "True when new members need admin approval to join."
+              }
+            },
+            "required": [
+              "jid",
+              "name"
+            ]
+          }
+        },
+        "total": {
+          "type": "integer"
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True when more rows match beyond this page."
+        },
+        "next_offset": {
+          "type": "integer",
+          "description": "Pass this as offset to fetch the next page. Present only when has_more is true."
+        }
+      },
+      "required": [
+        "groups",
+        "total",
+        "has_more"
+      ]
+    }
+  },
+  {
+    "name": "group_members",
+    "_category": "group",
+    "description": "List members of the groups and their activity.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "group_jids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Only these group/community jids. Omit for all available groups."
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "phone",
+              "role",
+              "last_activity",
+              "activity_count",
+              "joined_at",
+              "left_at",
+              "groups",
+              "last_read"
+            ]
+          },
+          "description": "Extra fields to include; lid and name are always returned. 'groups' lists which groups the member belongs to. Omit for all fields."
+        },
+        "activity_from": {
+          "type": "string",
+          "description": "Start of the activity window, 'YYYY-MM-DD HH:MM:SS' in the {{timezone}} timezone. Default: 30 days ago."
+        },
+        "activity_to": {
+          "type": "string",
+          "description": "End of the activity window, same format. Default: now."
+        },
+        "name_contains": {
+          "type": "string",
+          "description": "Filter: display name contains this text (case-insensitive)."
+        },
+        "phone_contains": {
+          "type": "string",
+          "description": "Filter: phone number contains these digits."
+        },
+        "lids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Filter: only these member lids."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "participant",
+            "admin",
+            "superadmin"
+          ],
+          "description": "Filter by group role."
+        },
+        "min_activity_count": {
+          "type": "integer",
+          "description": "Filter: at least this many activities in the window."
+        },
+        "max_activity_count": {
+          "type": "integer",
+          "description": "Filter: at most this many activities in the window. Use 0 to find completely inactive members."
+        },
+        "last_activity_before": {
+          "type": "string",
+          "description": "Filter: last activity older than this datetime, or never active."
+        },
+        "last_activity_after": {
+          "type": "string",
+          "description": "Filter: active at or after this datetime."
+        },
+        "include_left": {
+          "type": "boolean",
+          "description": "Include former members. Default false."
+        },
+        "order_by": {
+          "type": "string",
+          "enum": [
+            "lid",
+            "phone",
+            "name",
+            "last_activity",
+            "activity_count",
+            "joined_at"
+          ],
+          "description": "Sort key. Only lid and phone are unique; any other key uses lid as a tie-breaker. Default: lid."
+        },
+        "order": {
+          "type": "string",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "description": "Sort direction. Default: asc."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "At most this many members per page (default 50, maximum 500). This is a hard upper bound: a page may contain fewer rows when they are verbose — always continue from next_offset, not from offset + limit."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Paging offset. Default 0."
+        }
+      }
+    },
+    "responseJsonSchema": {
+      "type": "object",
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "lid": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name when known. WhatsApp only reveals names on activity, so members who never posted may have no name."
+              },
+              "phone": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "participant",
+                  "admin",
+                  "superadmin"
+                ]
+              },
+              "last_activity": {
+                "type": "string",
+                "description": "Datetime of the member's latest activity in the window; absent if none."
+              },
+              "activity_count": {
+                "type": "integer",
+                "description": "Activities in the window."
+              },
+              "joined_at": {
+                "type": "string"
+              },
+              "left_at": {
+                "type": "string",
+                "description": "Present only for former members."
+              },
+              "groups": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Jids of the groups the member belongs to."
+              },
+              "last_read": {
+                "type": "string",
+                "description": "Date the member last read a message from the monitoring account in this group ('YYYY-MM-DD'). Only tracked for members with read receipts enabled, and only for the account's own messages — absent otherwise. Useful to spot members who read but never post."
+              }
+            },
+            "required": [
+              "lid"
+            ]
+          }
+        },
+        "total": {
+          "type": "integer",
+          "description": "Members matching the filters, before paging."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True when more rows match beyond this page."
+        },
+        "next_offset": {
+          "type": "integer",
+          "description": "Pass this as offset to fetch the next page. Present only when has_more is true."
+        }
+      },
+      "required": [
+        "members",
+        "total",
+        "has_more"
+      ]
+    }
+  },
+  {
+    "name": "group_messages",
+    "_category": "group",
+    "description": "Read messages the way participants see them (final edited text; polls, events and reactions resolved; deleted messages excluded unless include_deleted). Do not count activity by paging through this tool — use activity_stats for counts.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "group_jids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Only these group/community jids. Omit for all available groups."
+        },
+        "from": {
+          "type": "string",
+          "description": "Range start (inclusive), 'YYYY-MM-DD HH:MM:SS' in the {{timezone}} timezone. Default: 7 days ago."
+        },
+        "to": {
+          "type": "string",
+          "description": "Range end (inclusive), same format. Default: now."
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "message",
+              "poll",
+              "event"
+            ]
+          },
+          "description": "Kinds of items to return; votes, responses, edits and reactions are folded into their parent item. Default: all kinds."
+        },
+        "has_reactions": {
+          "type": "boolean",
+          "description": "Filter: only items that received reactions."
+        },
+        "order": {
+          "type": "string",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "description": "asc = oldest first (use for summarizing a period or reading from a timestamp), desc = newest first. Default: asc."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "At most this many items per page (default 50, maximum 200). This is a hard upper bound: a page may contain fewer rows when they are verbose — always continue from next_offset, not from offset + limit."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Paging offset. Default 0."
+        },
+        "member_lid": {
+          "type": "string",
+          "description": "Filter: only items this member was involved in — they authored it, reacted to it, replied to it, voted in the poll, responded to the event, or deleted it (admins can delete others' messages); plus replies to this member's messages and messages mentioning this member."
+        },
+        "include_deleted": {
+          "type": "boolean",
+          "description": "Include deleted messages, marked with deleted/deleted_by and shown with their last known content. Useful when inspecting spam that admins already removed. Default false."
+        }
+      }
+    },
+    "responseJsonSchema": {
+      "type": "object",
+      "properties": {
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "WhatsApp's message id, unique within the group. reply_to_id and message_search.message_id use the same id space."
+              },
+              "group_jid": {
+                "type": "string"
+              },
+              "sent_at": {
+                "type": "string",
+                "description": "'YYYY-MM-DD HH:MM:SS' in the {{timezone}} timezone."
+              },
+              "author": {
+                "type": "object",
+                "properties": {
+                  "lid": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Display name when known; may be absent."
+                  }
+                },
+                "required": [
+                  "lid"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message",
+                  "poll",
+                  "event"
+                ]
+              },
+              "text": {
+                "type": "string",
+                "description": "Message text or caption, final version after any edits."
+              },
+              "edited": {
+                "type": "boolean",
+                "description": "Present and true when the text was edited."
+              },
+              "reply_to_id": {
+                "type": "string",
+                "description": "WhatsApp message id of the message this one replies to, when it is a reply."
+              },
+              "reactions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "emoji": {
+                      "type": "string"
+                    },
+                    "by": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Members who reacted with this emoji. Each entry is one member as '<lid> <phone> <name>': lid digits, then phone digits (or '-' when unknown), then the display name (may be empty). lid guarantees uniqueness; split on the first two spaces to parse."
+                    }
+                  },
+                  "required": [
+                    "emoji",
+                    "by"
+                  ]
+                }
+              },
+              "poll": {
+                "type": "object",
+                "description": "Present when type is poll.",
+                "properties": {
+                  "question": {
+                    "type": "string"
+                  },
+                  "options": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "votes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "Members who voted for this option. Each entry is one member as '<lid> <phone> <name>': lid digits, then phone digits (or '-' when unknown), then the display name (may be empty). lid guarantees uniqueness; split on the first two spaces to parse."
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "votes"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "question",
+                  "options"
+                ]
+              },
+              "event": {
+                "type": "object",
+                "description": "Present when type is event.",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "start": {
+                    "type": "string",
+                    "description": "Event start datetime."
+                  },
+                  "canceled": {
+                    "type": "boolean"
+                  },
+                  "responses": {
+                    "type": "object",
+                    "properties": {
+                      "going": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Members who responded \"going\". Each entry is one member as '<lid> <phone> <name>': lid digits, then phone digits (or '-' when unknown), then the display name (may be empty). lid guarantees uniqueness; split on the first two spaces to parse."
+                      },
+                      "maybe": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Members who responded \"maybe\". Each entry is one member as '<lid> <phone> <name>': lid digits, then phone digits (or '-' when unknown), then the display name (may be empty). lid guarantees uniqueness; split on the first two spaces to parse."
+                      },
+                      "not_going": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Members who responded \"not going\". Each entry is one member as '<lid> <phone> <name>': lid digits, then phone digits (or '-' when unknown), then the display name (may be empty). lid guarantees uniqueness; split on the first two spaces to parse."
+                      }
+                    },
+                    "required": [
+                      "going",
+                      "maybe",
+                      "not_going"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "responses"
+                ]
+              },
+              "media": {
+                "type": "string",
+                "description": "Present when the message carried non-text content, e.g. 'image', 'video', 'sticker', 'voice message', 'audio', 'document: <filename>', 'location', 'live location', 'contact'. The media itself is never included; text carries the caption when there is one."
+              },
+              "deleted": {
+                "type": "boolean",
+                "description": "Present and true when the message was deleted (only returned when include_deleted is true)."
+              },
+              "deleted_by": {
+                "type": "object",
+                "description": "Who deleted the message; may differ from the author when an admin removed it.",
+                "properties": {
+                  "lid": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Display name when known; may be absent."
+                  }
+                },
+                "required": [
+                  "lid"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "group_jid",
+              "sent_at",
+              "author",
+              "type"
+            ]
+          }
+        },
+        "total": {
+          "type": "integer",
+          "description": "Messages matching the filters, before paging."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True when more rows match beyond this page."
+        },
+        "next_offset": {
+          "type": "integer",
+          "description": "Pass this as offset to fetch the next page. Present only when has_more is true."
+        }
+      },
+      "required": [
+        "messages",
+        "total",
+        "has_more"
+      ]
+    }
+  },
+  {
+    "name": "activity_stats",
+    "_category": "group",
+    "description": "Count activity over one or more explicit date ranges — the reliable way to answer 'how many' and 'how active' questions.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "group_jids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Only these group/community jids. Omit for all available groups."
+        },
+        "participant_lids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Restrict to these members: counts and member numbers cover only their activity. Omit for everyone."
+        },
+        "ranges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "description": "Range start (inclusive), 'YYYY-MM-DD HH:MM:SS' in the {{timezone}} timezone."
+              },
+              "to": {
+                "type": "string",
+                "description": "Range end (inclusive), same format."
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ]
+          },
+          "description": "1 to 12 explicit ranges to count over, e.g. one per month for a monthly breakdown."
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "corrective",
+              "secondary"
+            ]
+          },
+          "description": "Which activity blocks to include in counts: primary (messages, polls, events), corrective (edits, own deletes), secondary (reactions, poll votes, event responses). Default: all three. The members block is always returned."
+        }
+      },
+      "required": [
+        "ranges"
+      ]
+    },
+    "responseJsonSchema": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "description": "One row per group per requested range. When more than one group is covered, an extra row per range has group_jid 'total' and aggregates across all requested groups: counts sum, but member numbers are distinct persons (someone active in several groups counts once — e.g. 5 active in group A and 4 in group B can be 7 overall), and joined/left sum as events.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "group_jid": {
+                "type": "string"
+              },
+              "group_name": {
+                "type": "string"
+              },
+              "range": {
+                "type": "object",
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to"
+                ]
+              },
+              "counts": {
+                "type": "object",
+                "description": "Only the requested category blocks are present; each block is always complete.",
+                "properties": {
+                  "primary": {
+                    "type": "object",
+                    "properties": {
+                      "messages": {
+                        "type": "integer"
+                      },
+                      "polls": {
+                        "type": "integer"
+                      },
+                      "events": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "messages",
+                      "polls",
+                      "events"
+                    ]
+                  },
+                  "corrective": {
+                    "type": "object",
+                    "properties": {
+                      "edits": {
+                        "type": "integer"
+                      },
+                      "own_deletes": {
+                        "type": "integer",
+                        "description": "Messages deleted by their own author."
+                      }
+                    },
+                    "required": [
+                      "edits",
+                      "own_deletes"
+                    ]
+                  },
+                  "secondary": {
+                    "type": "object",
+                    "properties": {
+                      "reactions": {
+                        "type": "integer"
+                      },
+                      "poll_votes": {
+                        "type": "integer"
+                      },
+                      "event_responses": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "reactions",
+                      "poll_votes",
+                      "event_responses"
+                    ]
+                  }
+                }
+              },
+              "members": {
+                "type": "object",
+                "properties": {
+                  "contributors": {
+                    "type": "integer",
+                    "description": "Distinct members with at least one primary action in the range."
+                  },
+                  "engagers": {
+                    "type": "integer",
+                    "description": "Distinct members with at least one secondary action in the range (may overlap contributors)."
+                  },
+                  "readers": {
+                    "type": "integer",
+                    "description": "Distinct members who read the group during the range, from read receipts. Approximate — receipts are opt-in and only cover the monitoring account's messages — and only computable when the range extends to the present; absent for past ranges."
+                  },
+                  "joined": {
+                    "type": "integer",
+                    "description": "Members who joined during the range (recorded going forward from when this feature was deployed)."
+                  },
+                  "left": {
+                    "type": "integer",
+                    "description": "Members who left or were removed during the range (recorded going forward)."
+                  },
+                  "total": {
+                    "type": "integer",
+                    "description": "Current member count."
+                  }
+                },
+                "required": [
+                  "contributors",
+                  "engagers",
+                  "joined",
+                  "left",
+                  "total"
+                ],
+                "description": "Member engagement numbers for the row. Omitted when the call filters by a single participant — the numbers would all be 0 or 1."
+              }
+            },
+            "required": [
+              "group_jid",
+              "group_name",
+              "range",
+              "counts"
+            ]
+          }
+        }
+      },
+      "required": [
+        "rows"
+      ]
+    }
+  },
+  {
+    "name": "message_search",
+    "_category": "group",
+    "description": "Find where something was discussed by searching message texts. To read the surrounding conversation, call group_messages with from set to a hit's sent_at and order asc.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Search alternatives, combined with OR: a message matches when it satisfies at least one entry. Within an entry ALL words must appear (AND), in any order; wrap words in \"double quotes\" to require an exact phrase. Example: [\"picnic saturday\", \"\\\"beach volleyball\\\"\"] finds messages with both picnic and saturday, or the exact phrase beach volleyball."
+        },
+        "group_jids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Only these group/community jids. Omit for all available groups."
+        },
+        "author_lid": {
+          "type": "string",
+          "description": "Only messages written by this member."
+        },
+        "from": {
+          "type": "string",
+          "description": "Range start (inclusive), 'YYYY-MM-DD HH:MM:SS' in the {{timezone}} timezone. Default: no lower bound."
+        },
+        "to": {
+          "type": "string",
+          "description": "Range end (inclusive), same format. Default: now."
+        },
+        "order": {
+          "type": "string",
+          "enum": [
+            "asc",
+            "desc"
+          ],
+          "description": "Order of hits by date: asc = oldest first, desc = newest first. Default: desc."
+        },
+        "limit": {
+          "type": "integer",
+          "description": "At most this many hits per page (default 20, maximum 100). This is a hard upper bound: a page may contain fewer rows when they are verbose — always continue from next_offset, not from offset + limit."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Paging offset. Default 0."
+        }
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "responseJsonSchema": {
+      "type": "object",
+      "properties": {
+        "hits": {
+          "type": "array",
+          "description": "Matching messages, ordered by sent_at per the order parameter (newest first by default).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "message_id": {
+                "type": "string",
+                "description": "WhatsApp's message id (same id space as group_messages.id)."
+              },
+              "group_jid": {
+                "type": "string"
+              },
+              "group_name": {
+                "type": "string"
+              },
+              "sent_at": {
+                "type": "string"
+              },
+              "author_name": {
+                "type": "string",
+                "description": "Display name when known; may be absent."
+              },
+              "snippet": {
+                "type": "string",
+                "description": "Short excerpt around the match."
+              }
+            },
+            "required": [
+              "message_id",
+              "group_jid",
+              "group_name",
+              "sent_at",
+              "snippet"
+            ]
+          }
+        },
+        "total": {
+          "type": "integer"
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True when more rows match beyond this page."
+        },
+        "next_offset": {
+          "type": "integer",
+          "description": "Pass this as offset to fetch the next page. Present only when has_more is true."
+        }
+      },
+      "required": [
+        "hits",
+        "total",
+        "has_more"
+      ]
+    }
+  }
+]

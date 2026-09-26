@@ -9,7 +9,7 @@
     "url": "https://github.com/marinaglancy/whatsapp-group-monitor"
   },
   "scripts": {
-    "build": "tsc && cp -r src/web/static dist/web/static",
+    "build": "tsc && cp -r src/web/static dist/web/static && mkdir -p dist/ai/tools && cp src/ai/tools/*.json dist/ai/tools/",
     "dev": "tsx --env-file=.env src/index.ts",
     "start": "node dist/index.js",
     "test": "vitest run",
