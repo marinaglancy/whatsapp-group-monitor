@@ -25,6 +25,17 @@ function extractText(message: proto.IMessage): string | null {
   return null
 }
 
+function extractMentions(message: proto.IMessage): string[] {
+  const content = message.extendedTextMessage
+    || message.imageMessage
+    || message.videoMessage
+    || message.audioMessage
+    || message.documentMessage
+    || message.stickerMessage
+  const mentioned = (content as { contextInfo?: { mentionedJid?: string[] } } | undefined)?.contextInfo?.mentionedJid || []
+  return mentioned.map(j => jidNormalizedUser(j))
+}
+
 function extractQuotedId(message: proto.IMessage): string | null {
   const content = message.extendedTextMessage
     || message.imageMessage
@@ -333,11 +344,17 @@ export class ActivityRecord {
     if (contentType) {
       const text = extractText(msg.message!)
       const quotedId = extractQuotedId(msg.message!)
+      const mentions = extractMentions(msg.message!)
       return new ActivityRecord({
         groupJid, userJid, messageId, timestamp, raw,
         parentId: quotedId,
         eventType: 'message',
-        metadata: { contentType, ...(text ? { text } : {}), ...(quotedId ? { isReply: true } : {}) },
+        metadata: {
+          contentType,
+          ...(text ? { text } : {}),
+          ...(quotedId ? { isReply: true } : {}),
+          ...(mentions.length ? { mentions } : {}),
+        },
       })
     }
 

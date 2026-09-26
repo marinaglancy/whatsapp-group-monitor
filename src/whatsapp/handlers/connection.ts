@@ -1,10 +1,11 @@
+import { jidNormalizedUser } from 'baileys'
 import type { ConnectionState, Contact } from 'baileys'
 import { logger } from '../../utils/logger.js'
 import { initAccountDb, closeAccountDb } from '../../db/account.js'
 
 let currentQr: string | null = null
 let connectionState: string | null = null
-let botUser: { name: string | null; phone: string | null } | null = null
+let botUser: { name: string | null; phone: string | null; jid: string | null; lid: string | null } | null = null
 
 export function getCurrentQr() { return currentQr }
 export function getConnectionState() { return connectionState }
@@ -22,7 +23,13 @@ export function handleConnectionUpdate(update: Partial<ConnectionState>, user?: 
       currentQr = null
       const phone = user?.id?.split(':')[0].split('@')[0] || null
       const name = user?.name || user?.notify || null
-      botUser = { name, phone }
+      const lidRaw = (user as { lid?: string } | null | undefined)?.lid
+      botUser = {
+        name,
+        phone,
+        jid: user?.id ? jidNormalizedUser(user.id) : null,
+        lid: lidRaw ? jidNormalizedUser(lidRaw) : null,
+      }
       if (phone) {
         initAccountDb(phone)
       }
@@ -38,5 +45,17 @@ export function updateBotUser(user?: Contact | null) {
   if (!user) return
   const phone = user.id?.split(':')[0].split('@')[0] || botUser?.phone || null
   const name = user.name || user.notify || botUser?.name || null
-  botUser = { name, phone }
+  const lidRaw = (user as { lid?: string }).lid
+  botUser = {
+    name,
+    phone,
+    jid: user.id ? jidNormalizedUser(user.id) : botUser?.jid ?? null,
+    lid: lidRaw ? jidNormalizedUser(lidRaw) : botUser?.lid ?? null,
+  }
+}
+
+/** Normalized jids identifying the bot account (phone jid and lid). Empty when not connected. */
+export function getBotJids(): string[] {
+  if (!botUser) return []
+  return [botUser.jid, botUser.lid].filter((j): j is string => !!j)
 }
