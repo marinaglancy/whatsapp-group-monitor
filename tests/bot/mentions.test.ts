@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedUser } from '../helpers/fixtures.js'
-import { resolveMentionTokens } from '../../src/bot/setup.js'
+import { resolveMentionTokens, expandGroupMentionTokens } from '../../src/bot/setup.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
 beforeEach(() => {
@@ -34,5 +34,19 @@ describe('resolveMentionTokens', () => {
     const out = resolveMentionTokens('meet @9am, nothing else')
     expect(out.mentions).toEqual([])
     expect(out.groupMentions).toEqual([])
+  })
+})
+
+describe('expandGroupMentionTokens', () => {
+  const gm = [{ groupJid: '120363000000000001@g.us', groupSubject: 'Alpha' }]
+
+  it('rewrites group tokens to the full-jid form real clients use', () => {
+    expect(expandGroupMentionTokens('in @120363000000000001: *5*, and again @120363000000000001.', gm))
+      .toBe('in @120363000000000001@g.us: *5*, and again @120363000000000001@g.us.')
+  })
+
+  it('is idempotent on already-full tokens and leaves other digits alone', () => {
+    expect(expandGroupMentionTokens('see @120363000000000001@g.us and @88112233445', gm))
+      .toBe('see @120363000000000001@g.us and @88112233445')
   })
 })

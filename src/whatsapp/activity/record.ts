@@ -117,6 +117,13 @@ export class ActivityRecord {
     const messageId = msg.key.id
     if (!messageId) return null
 
+    // Real clients wrap group-mention messages in a futureproof envelope that
+    // Baileys' normalizeMessageContent does not unwrap; classify (and store)
+    // the inner message so text/mentions/media extraction works.
+    if (msg.message?.groupMentionedMessage?.message) {
+      msg = { ...msg, message: msg.message.groupMentionedMessage.message } as WAMessage
+    }
+
     let userJid: string | null = null
     const participant = msg.key.participant || (msg.key as any).participantAlt
     if (participant) {

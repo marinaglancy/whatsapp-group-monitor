@@ -1,4 +1,5 @@
-import { generateMessageID } from 'baileys'
+import { generateMessageID, generateWAMessageFromContent } from 'baileys'
+import { ActivityRecord } from '../whatsapp/activity/record.js'
 import { registerJobHandler, type JobHandler } from './worker.js'
 import { registerSentMessage } from './sent-registry.js'
 import { resolveQaScope } from './scope.js'
@@ -46,6 +47,18 @@ export function resolveMentionTokens(text: string): {
   return { mentions, groupMentions }
 }
 
+/** Rewrite matched group tokens from the prompt's @<digits> form to the
+ *  @<full jid> form real WhatsApp clients put in group-mention message text —
+ *  receiving phones match the token against the jid literally. */
+export function expandGroupMentionTokens(text: string, groupMentions: { groupJid: string; groupSubject: string }[]): string {
+  let out = text
+  for (const gm of groupMentions) {
+    const digits = gm.groupJid.split('@')[0]
+    out = out.replace(new RegExp(`@${digits}(?!\\d|@g\\.us)`, 'g'), `@${gm.groupJid}`)
+  }
+  return out
+}
+
 /** Send a reply into the job's group, quoted to the originating message when
  *  its raw payload is available in the activity log. Attaches mention metadata
  *  for @<digits> tokens so groups and members render as tappable links. */
@@ -63,13 +76,38 @@ export async function sendJobReply(job: BotJob, text: string): Promise<string | 
   // the sendMessage promise — the trigger must already know it is ours.
   const messageId = generateMessageID()
   registerSentMessage(messageId)
+
+  if (groupMentions.length) {
+    // Group mentions render as tappable links only when the message is wrapped
+    // in a groupMentionedMessage envelope and the text carries the FULL group
+    // jid (verified against a message sent by a real phone). sendMessage cannot
+    // produce the envelope, so this path builds the message itself, relays it,
+    // and records its own activity row (relayMessage has no self-echo).
+    const fullMsg = generateWAMessageFromContent(job.groupJid!, {
+      extendedTextMessage: {
+        text: expandGroupMentionTokens(text, groupMentions),
+        contextInfo: {
+          ...(mentions.length ? { mentionedJid: mentions } : {}),
+          groupMentions,
+        },
+      },
+    } as never, {
+      userJid: sock.user!.id,
+      messageId,
+      ...(quoted ? { quoted: quoted as never } : {}),
+    })
+    fullMsg.message = { groupMentionedMessage: { message: fullMsg.message } } as never
+    await sock.relayMessage(job.groupJid!, fullMsg.message!, { messageId })
+    ActivityRecord.fromMessage(
+      { ...fullMsg, messageTimestamp: Math.floor(Date.now() / 1000) } as never,
+      job.groupJid!,
+    )?.saveAndProcess()
+    return messageId
+  }
+
   const sent = await sock.sendMessage(
     job.groupJid!,
-    {
-      text,
-      ...(mentions.length ? { mentions } : {}),
-      ...(groupMentions.length ? { contextInfo: { groupMentions } } : {}),
-    },
+    { text, ...(mentions.length ? { mentions } : {}) },
     { messageId, ...(quoted ? { quoted: quoted as never } : {}) },
   )
   return sent?.key?.id ?? messageId

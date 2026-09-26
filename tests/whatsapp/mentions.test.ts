@@ -33,4 +33,23 @@ describe('mention capture', () => {
     const rec = ActivityRecord.fromMessage(makeMsg({ conversation: 'plain text' }), 'g1@g.us')!
     expect('mentions' in rec.metadata!).toBe(false)
   })
+
+  it('unwraps groupMentionedMessage envelopes (real clients wrap group mentions)', () => {
+    const rec = ActivityRecord.fromMessage(makeMsg({
+      groupMentionedMessage: {
+        message: {
+          extendedTextMessage: {
+            text: 'events are in @120363276236119239@g.us this week',
+            contextInfo: {
+              mentionedJid: ['5@lid'],
+              groupMentions: [{ groupJid: '120363276236119239@g.us', groupSubject: 'Hiking' }],
+            },
+          },
+        },
+      },
+    }), 'g1@g.us')!
+    expect(rec.metadata!.text).toBe('events are in @120363276236119239@g.us this week')
+    expect(rec.metadata!.contentType).toBe('extendedTextMessage')
+    expect(rec.metadata!.mentions).toEqual(['5@lid'])
+  })
 })
