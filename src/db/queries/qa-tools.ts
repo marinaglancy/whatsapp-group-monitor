@@ -535,13 +535,10 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
 
   const authorCond = opts.authorLid ? sql` AND t.user_jid = ${opts.authorLid}` : sql``
   const dir = opts.order === 'desc' ? sql`DESC` : sql`ASC`
-  // snippet() only works when the FTS table drives the query, so it is
-  // computed in an FTS-only subquery before the joins
+  // snippet() only works when the FTS table drives the query; MATERIALIZED
+  // stops the flattener from inlining the subquery into the join
   const joins = sql`
-    FROM (
-      SELECT rowid AS rid, snippet(messages_fts, 0, '', '', '…', 12) AS snip
-      FROM messages_fts WHERE messages_fts MATCH ${match}
-    ) f
+    FROM fhits f
     JOIN group_activity_log h ON h.id = f.rid
     JOIN group_activity_log t
       ON t.group_jid = h.group_jid
@@ -550,8 +547,13 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
     WHERE t.group_jid IN (${inList(jids)})
       AND t.timestamp BETWEEN ${opts.from} AND ${opts.to}${authorCond}`
 
-  const total = db.get<{ cnt: number }>(sql`SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
+  const withFts = sql`WITH fhits AS MATERIALIZED (
+      SELECT rowid AS rid, snippet(messages_fts, 0, '', '', '…', 12) AS snip
+      FROM messages_fts WHERE messages_fts MATCH ${match}
+    )`
+  const total = db.get<{ cnt: number }>(sql`${withFts} SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
   const rows = db.all<Record<string, unknown>>(sql`
+    ${withFts}
     SELECT t.message_id AS message_id, t.group_jid AS group_jid, t.user_jid AS user_jid, t.timestamp AS ts,
            f.snip AS snip
     ${joins}
