@@ -15,6 +15,7 @@ import { getUser } from '../../db/queries/users.js'
 import { getUserGroupMemberships } from '../../db/queries/members.js'
 import { getUserActivityPerGroup } from '../../db/queries/activity.js'
 import { registerBackupRoutes } from './backup.js'
+import { syncGroups } from '../../whatsapp/handlers/group-sync.js'
 
 export function registerRoutes(app: FastifyInstance) {
   registerBackupRoutes(app)
@@ -119,6 +120,17 @@ export function registerRoutes(app: FastifyInstance) {
     const groups = getAllGroups()
     GroupRecord.populateAllSummaries(groups)
     return reply.send({ groups: groups.map(g => g.toJSON()) })
+  })
+
+  app.post('/api/resync', { preHandler: requireAuthApi }, async (req, reply) => {
+    if (!verifyCsrf(req)) {
+      return reply.status(403).send({ error: 'Invalid CSRF token' })
+    }
+    if (getConnectionState() !== 'open' || !isAccountDbReady()) {
+      return reply.status(503).send({ error: 'Not connected' })
+    }
+    await syncGroups(getSock())
+    return reply.send({ ok: true })
   })
 
   app.get('/group/:jid', { preHandler: requireAuth }, async (req, reply) => {

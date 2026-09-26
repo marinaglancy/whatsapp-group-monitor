@@ -45,7 +45,10 @@
   {{> header}}
   <div class="content">
     {{> status-bar}}
-    <h2 style="font-size: 1.1rem; color: #1a1a1a;">Groups</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="font-size: 1.1rem; color: #1a1a1a;">Groups</h2>
+      <button id="resync-btn" onclick="resyncGroups()" title="Re-fetch all groups and members from WhatsApp" style="background:white;border:1px solid #ddd;border-radius:6px;padding:0.35rem 0.9rem;cursor:pointer;font-size:0.85rem;color:#1a1a1a">Resync</button>
+    </div>
     <div id="groups"><p class="loading">Loading...</p></div>
   </div>
   <script>
@@ -117,6 +120,22 @@
       const d = document.createElement('div');
       d.textContent = s;
       return d.innerHTML;
+    }
+
+    async function resyncGroups() {
+      const btn = document.getElementById('resync-btn');
+      const csrf = document.querySelector('meta[name="csrf-token"]').content;
+      btn.disabled = true;
+      btn.textContent = 'Resyncing…';
+      let ok = false;
+      try {
+        const res = await fetch('/api/resync', { method: 'POST', headers: { 'x-csrf-token': csrf } });
+        ok = res.ok;
+        if (ok) await loadGroups();
+      } catch (e) { /* fall through */ }
+      btn.textContent = ok ? 'Resync' : 'Resync failed';
+      btn.disabled = false;
+      if (!ok) setTimeout(() => { btn.textContent = 'Resync'; }, 3000);
     }
 
     loadGroups();
