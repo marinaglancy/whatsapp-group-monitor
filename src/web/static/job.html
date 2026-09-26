@@ -63,11 +63,28 @@
           + (job.error ? '<details open><summary>Error</summary><pre>' + escHtml(job.error) + '</pre></details>' : '')
           + '</div>';
         html += '<div class="card"><h3 style="font-size:0.95rem;margin:0">Events (' + events.length + ')</h3>';
+        // long multiline text fields (system prompt, model text) are unreadable
+        // as JSON-escaped strings: lift them out into their own blocks
+        const liftText = (holder, key, label, blocks) => {
+          if (holder && typeof holder[key] === 'string' && holder[key].includes('\n')) {
+            blocks.push('<details><summary>' + label + '</summary><pre>' + escHtml(holder[key]) + '</pre></details>');
+            holder[key] = '… shown below as "' + label + '"';
+          }
+        };
         for (const e of events) {
           const openAttr = (e.eventType === 'ai_call' || e.eventType === 'tool_call') ? '' : ' open';
+          let dataHtml = '';
+          if (e.data) {
+            const d = JSON.parse(JSON.stringify(e.data));
+            const blocks = [];
+            liftText(d.request, 'system', 'system prompt', blocks);
+            liftText(d.request, 'question', 'question', blocks);
+            liftText(d.response, 'text', 'response text', blocks);
+            dataHtml = '<details' + openAttr + '><summary>data</summary><pre>' + escHtml(JSON.stringify(d, null, 2)) + '</pre></details>' + blocks.join('');
+          }
           html += '<div class="event"><span class="etype">' + escHtml(e.eventType) + '</span><span class="etime">' + fmt(e.createdAt) + '</span>'
             + (e.messageId ? ' <span class="etime">msg: ' + escHtml(e.messageId) + '</span>' : '')
-            + (e.data ? '<details' + openAttr + '><summary>data</summary><pre>' + escHtml(JSON.stringify(e.data, null, 2)) + '</pre></details>' : '')
+            + dataHtml
             + '</div>';
         }
         html += '</div>';
