@@ -50,6 +50,10 @@ describe('getAiSettings', () => {
     expect(DEFAULT_QA_SYSTEM_PROMPT).not.toMatch(/Q&A/i)
   })
 
+  it('explains that join dates are only known for observed joins', () => {
+    expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/join date/i)
+  })
+
   it('falls back to the default prompt when the stored one is blank', () => {
     setSetting('ai_system_prompt', '   ')
     expect(getAiSettings().systemPrompt).toBe(DEFAULT_QA_SYSTEM_PROMPT)

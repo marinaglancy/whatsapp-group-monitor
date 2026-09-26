@@ -103,7 +103,9 @@ export function upsertMembership(groupJid: string, userJid: string, membership: 
     groupJid,
     userJid,
     membership,
-    joinedAt: isJoining ? now : null,
+    // suppressEvents marks "we just learned about them" (baseline roster):
+    // their real join date is unknown, so it stays empty — never fabricated.
+    joinedAt: isJoining && !opts.suppressEvents ? now : null,
     leftAt: isLeaving ? now : null,
     updatedAt: now,
   }).onConflictDoUpdate({

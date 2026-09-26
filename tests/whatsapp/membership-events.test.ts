@@ -5,7 +5,7 @@ import { seedGroup, seedUser } from '../helpers/fixtures.js'
 import { upsertMembership, syncGroupParticipants } from '../../src/db/queries/members.js'
 import { handleGroupParticipantsUpdate } from '../../src/whatsapp/handlers/group-participants.js'
 import { getAccountDb } from '../../src/db/account.js'
-import { groupActivityLog } from '../../src/db/schema.js'
+import { groupActivityLog, groupMembers } from '../../src/db/schema.js'
 import { eq, and } from 'drizzle-orm'
 
 let dbs: ReturnType<typeof setupTestDbs>
@@ -55,6 +55,23 @@ describe('membership events', () => {
       { id: 'u1@lid' }, { id: 'u2@lid', admin: 'admin' },
     ] as never)
     expect(membershipEvents()).toEqual([])
+  })
+
+  it('leaves joined_at empty for baseline roster members (join date unknown)', () => {
+    syncGroupParticipants('g1@g.us', [
+      { id: 'u1@lid' }, { id: 'u2@lid' },
+    ] as never)
+    const db = getAccountDb()
+    const rows = db.select().from(groupMembers).where(eq(groupMembers.groupJid, 'g1@g.us')).all()
+    expect(rows.length).toBe(2)
+    for (const r of rows) expect(r.joinedAt).toBeNull()
+    // a member appearing later in the known roster genuinely joined now
+    syncGroupParticipants('g1@g.us', [
+      { id: 'u1@lid' }, { id: 'u2@lid' }, { id: 'u3@lid' },
+    ] as never)
+    const u3 = db.select().from(groupMembers)
+      .where(and(eq(groupMembers.groupJid, 'g1@g.us'), eq(groupMembers.userJid, 'u3@lid'))).get()!
+    expect(u3.joinedAt).not.toBeNull()
   })
 
   it('emits joins and leaves from sync diffs on an already-known group', () => {
