@@ -83,6 +83,24 @@
       <h2 id="group-name">Loading...</h2>
     </div>
     <div class="group-meta" id="group-meta"></div>
+    <div id="bot-card" style="display:none;background:white;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,0.1);padding:1rem 1.25rem;margin-bottom:1.25rem">
+      <h3 style="font-size:0.95rem;margin:0 0 0.5rem">Bot</h3>
+      <label style="font-size:0.9rem;display:flex;align-items:center;gap:0.5rem">
+        <input type="checkbox" id="qa-enabled" onchange="toggleQaConfig()" />
+        Q&amp;A assistant — members of this group can ask the bot about linked groups
+      </label>
+      <p id="qa-no-key" style="display:none;color:#e65100;font-size:0.8rem;margin:0.5rem 0 0">
+        ⚠️ No Gemini API key configured — the assistant will not answer. <a href="/settings">Configure it in Settings</a>.
+      </p>
+      <div id="qa-config" style="display:none;margin-top:0.75rem">
+        <p style="color:#667781;font-size:0.8rem;margin:0 0 0.4rem">Linked groups and communities (a community covers all its groups, current and future):</p>
+        <div id="qa-links" style="max-height:220px;overflow-y:auto;border:1px solid #eee;border-radius:6px;padding:0.5rem;font-size:0.85rem"></div>
+        <p style="color:#667781;font-size:0.8rem;margin:0.75rem 0 0.4rem">Additional instructions for the assistant (optional — tone, language, emphasis):</p>
+        <textarea id="qa-instructions" maxlength="4000" rows="4" placeholder="e.g. Always answer in Russian. Keep answers under five lines." style="width:100%;box-sizing:border-box;border:1px solid #eee;border-radius:6px;padding:0.5rem;font-size:0.85rem;font-family:inherit"></textarea>
+      </div>
+      <button class="save-btn" onclick="saveBotConfig()" style="margin-top:0.75rem;padding:0.5rem 1.25rem;background:#25d366;color:white;border:none;border-radius:6px;cursor:pointer">Save</button>
+      <span id="bot-msg" style="font-size:0.8rem;margin-left:0.75rem"></span>
+    </div>
     <div id="members"><p class="loading">Loading...</p></div>
     <div id="pagination" class="pagination" style="display:none"></div>
     <button class="toggle" id="toggle-left" style="display:none" onclick="toggleLeft()">Show former members</button>
@@ -118,6 +136,7 @@
         const data = await res.json();
         document.getElementById('group-name').textContent = data.group.name;
         document.getElementById('group-meta').textContent = data.group.memberCount + ' members' + (data.group.lastActivity ? ' \u00b7 last active ' + timeAgo(data.group.lastActivity) : '');
+        initBotCard(data.group);
         allMembers = data.members || [];
         const hasLeft = allMembers.some(m => m.membership === 'none');
         if (hasLeft) document.getElementById('toggle-left').style.display = 'inline';
@@ -197,6 +216,60 @@
       for (let i = startPage; i <= endPage; i++) pagHtml += '<button onclick="goPage(' + i + ')"' + (i === page ? ' class="active"' : '') + '>' + i + '</button>';
       pagHtml += '<button onclick="goPage(' + (page + 1) + ')"' + (page >= totalPages ? ' disabled' : '') + '>&raquo;</button></div>';
       pagEl.innerHTML = pagHtml;
+    }
+
+    async function initBotCard(group) {
+      if (group.isCommunity) return;
+      document.getElementById('bot-card').style.display = 'block';
+      document.getElementById('qa-enabled').checked = !!group.qaEnabled;
+      document.getElementById('qa-instructions').value = group.qaInstructions || '';
+      try {
+        const settings = await (await fetch('/api/settings')).json();
+        if (!settings.gemini_api_key_set) document.getElementById('qa-no-key').style.display = 'block';
+      } catch (e) { /* ignore */ }
+      try {
+        const res = await fetch('/api/groups');
+        const all = (await res.json()).groups || [];
+        const linked = new Set(group.qaLinkedJids || []);
+        const box = document.getElementById('qa-links');
+        const items = all
+          .filter(g => g.jid !== group.jid || linked.has(g.jid))
+          .sort((a, b) => (b.isCommunity - a.isCommunity) || a.name.localeCompare(b.name));
+        box.innerHTML = items.map(g =>
+          '<label style="display:block;padding:0.15rem 0"><input type="checkbox" class="qa-link" value="' + escHtml(g.jid) + '"'
+          + (linked.has(g.jid) ? ' checked' : '') + ' /> ' + escHtml(g.name)
+          + (g.isCommunity ? ' <span class="badge" style="background:#e8f5e9;color:#2e7d32">community</span>' : '') + '</label>').join('');
+      } catch (e) {
+        document.getElementById('qa-links').innerHTML = '<span class="inactive">Failed to load groups</span>';
+      }
+      toggleQaConfig();
+    }
+
+    function toggleQaConfig() {
+      document.getElementById('qa-config').style.display = document.getElementById('qa-enabled').checked ? 'block' : 'none';
+    }
+
+    async function saveBotConfig() {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+      const qaLinkedJids = Array.from(document.querySelectorAll('.qa-link:checked')).map(cb => cb.value);
+      const msg = document.getElementById('bot-msg');
+      try {
+        const res = await fetch('/api/groups/' + encodeURIComponent(groupJid) + '/bot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrfToken },
+          body: JSON.stringify({
+            qaEnabled: document.getElementById('qa-enabled').checked,
+            qaLinkedJids,
+            qaInstructions: document.getElementById('qa-instructions').value,
+          }),
+        });
+        msg.textContent = res.ok ? 'Saved' : 'Failed to save';
+        msg.style.color = res.ok ? '#25d366' : '#e74c3c';
+      } catch (e) {
+        msg.textContent = 'Failed to save';
+        msg.style.color = '#e74c3c';
+      }
+      setTimeout(() => { msg.textContent = ''; }, 3000);
     }
 
     function doSort(col) {
