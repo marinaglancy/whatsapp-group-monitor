@@ -31,9 +31,10 @@ describe('bot job tables', () => {
     expect(names).toContain('bot_job_events')
   })
 
-  it('adds bot_config to groups', () => {
+  it('adds bot_config and description to groups', () => {
     const cols = (getAccountDb().all(sql`SELECT name FROM pragma_table_info('groups')`) as { name: string }[]).map(c => c.name)
     expect(cols).toContain('bot_config')
+    expect(cols).toContain('description')
   })
 
   it('enforces unique (job_type, group_jid, message_id) when message_id is set', () => {

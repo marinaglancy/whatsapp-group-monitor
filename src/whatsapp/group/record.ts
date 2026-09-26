@@ -11,6 +11,7 @@ export class GroupRecord {
   botMembership: Group['botMembership']
   botFunctions: number
   botConfig: GroupBotConfig | null
+  description: string | null
   isArchived: boolean
   createdAt: Date | null
 
@@ -31,6 +32,7 @@ export class GroupRecord {
     this.botMembership = row.botMembership
     this.botFunctions = row.botFunctions
     this.botConfig = row.botConfig ?? null
+    this.description = row.description ?? null
     this.isArchived = row.isArchived ?? false
     this.createdAt = row.createdAt
   }
@@ -187,6 +189,7 @@ export class GroupRecord {
       qaEnabled: this.qaEnabled,
       qaLinkedJids: this.qaLinkedJids,
       qaInstructions: this.qaInstructions,
+      description: this.description,
       isArchived: this.isArchived,
       memberCount: this.memberCount,
       activityCount: this.activityCount,

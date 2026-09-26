@@ -1,8 +1,45 @@
 import { eq, and, notInArray, sql, inArray, or, isNull, lt } from 'drizzle-orm'
 import type { GroupParticipant } from 'baileys'
 import { getAccountDb } from '../account.js'
-import { groupMembers, users, groups, type MembershipLevel } from '../schema.js'
+import { groupMembers, users, groups, groupActivityLog, type MembershipLevel } from '../schema.js'
 import { upsertUser } from './users.js'
+
+export interface MembershipEventOpts {
+  /** Who performed the action, when known (live participant updates carry it). */
+  actor?: string | null
+  /** 'event' = live/replayed WhatsApp event, 'sync' = detected by a full sync diff. */
+  source?: 'event' | 'sync'
+  /** Baseline syncs of a previously unknown group suppress join events. */
+  suppressEvents?: boolean
+}
+
+function isActiveMembership(m: MembershipLevel | undefined | null): boolean {
+  return !!m && m !== 'none' && m !== 'pending_approval'
+}
+
+/** Record a member_joined / member_left row in the activity log (feeds
+ *  activity_stats joined/left; actor kept for future admin analysis). */
+function recordMembershipEvent(
+  groupJid: string,
+  userJid: string,
+  eventType: 'member_joined' | 'member_left',
+  opts: MembershipEventOpts,
+): void {
+  const db = getAccountDb()
+  const bare = userJid.split(':')[0].split('@')[0]
+  const prefix = eventType === 'member_joined' ? 'mj' : 'ml'
+  const messageId = `${prefix}_${bare}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
+  db.insert(groupActivityLog).values({
+    groupJid,
+    userJid,
+    messageId,
+    parentId: null,
+    eventType,
+    metadata: { source: opts.source ?? 'sync', ...(opts.actor ? { actor: opts.actor } : {}) },
+    raw: null,
+    timestamp: Math.floor(Date.now() / 1000),
+  }).run()
+}
 
 export function membershipFromAdmin(admin: GroupParticipant['admin']): MembershipLevel {
   if (admin === 'superadmin') return 'superadmin'
@@ -40,11 +77,25 @@ export function updateLastReadAt(groupJid: string, userJid: string, date: string
     .run()
 }
 
-export function upsertMembership(groupJid: string, userJid: string, membership: MembershipLevel) {
+export function upsertMembership(groupJid: string, userJid: string, membership: MembershipLevel, opts: MembershipEventOpts = {}) {
   const db = getAccountDb()
   const now = new Date()
   const isLeaving = membership === 'none'
   const isJoining = membership !== 'none' && membership !== 'pending_approval'
+
+  const prev = db.select({ membership: groupMembers.membership })
+    .from(groupMembers)
+    .where(and(eq(groupMembers.groupJid, groupJid), eq(groupMembers.userJid, userJid)))
+    .get()
+  if (!opts.suppressEvents) {
+    const wasActive = isActiveMembership(prev?.membership)
+    const isActive = isActiveMembership(membership)
+    if (!wasActive && isActive) {
+      recordMembershipEvent(groupJid, userJid, 'member_joined', opts)
+    } else if (wasActive && !isActive) {
+      recordMembershipEvent(groupJid, userJid, 'member_left', opts)
+    }
+  }
 
   return db.insert(groupMembers).values({
     groupJid,
@@ -69,27 +120,36 @@ export function syncGroupParticipants(groupJid: string, participants: GroupParti
   const activeUserJids: string[] = []
 
   db.transaction(() => {
+    // Baseline: a group with no known members yet gets its initial roster
+    // without join events (they didn't join now, we just learned about them).
+    const baseline = !db.select({ userJid: groupMembers.userJid })
+      .from(groupMembers)
+      .where(eq(groupMembers.groupJid, groupJid))
+      .limit(1)
+      .get()
+
     for (const p of participants) {
       upsertUser(p.id, {
         phoneNumber: p.phoneNumber || undefined,
         displayName: p.notify || undefined,
       })
       const membership = membershipFromAdmin(p.admin)
-      upsertMembership(groupJid, p.id, membership)
+      upsertMembership(groupJid, p.id, membership, { source: 'sync', suppressEvents: baseline })
       activeUserJids.push(p.id)
     }
 
-    if (activeUserJids.length > 0) {
-      const now = new Date()
-      db.update(groupMembers)
-        .set({ membership: 'none', leftAt: now, updatedAt: now })
-        .where(
-          and(
-            eq(groupMembers.groupJid, groupJid),
-            notInArray(groupMembers.userJid, activeUserJids),
-          )
-        )
-        .run()
+    // Members no longer in the roster: mark left one by one so the
+    // membership event is emitted per member.
+    const missing = db.select({ userJid: groupMembers.userJid })
+      .from(groupMembers)
+      .where(and(
+        eq(groupMembers.groupJid, groupJid),
+        notInArray(groupMembers.membership, ['none']),
+        ...(activeUserJids.length ? [notInArray(groupMembers.userJid, activeUserJids)] : []),
+      ))
+      .all()
+    for (const m of missing) {
+      upsertMembership(groupJid, m.userJid, 'none', { source: 'sync', suppressEvents: baseline })
     }
   })
 }

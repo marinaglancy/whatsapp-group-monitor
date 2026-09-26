@@ -1,7 +1,50 @@
-# Tools:
+# Tools
+
+We need a global setting for the timezone (maybe in the future can be overridden per Q&A).
+All dates have to be input and output in the format '2026-09-13 14:59:00' in the appropriate timezone (mind the DST).
+
 
 ## Group tools
 
-All group tools have a parameter for the Q&A group id and they never return any info for
+All group tools have a parameter for the Q&A group id and they never return any info for non-monitored groups
 
-1. Group list - return the list of monitored groups (names, ids, optional: descriptions)
+### Group list
+
+return the list of monitored groups (names, ids, optional: descriptions, is community, parent group id, number of members, etc.)
+
+has filters for the groups - all or selected ids
+
+has parameter for which fields to return
+
+### Group members
+
+parameters:
+group ids (all/selected), order by, limit, offset, fields to return, date range (for activity), filters (i.e. search by number, by lid, by name, by last activity, by activity count)
+
+returns (for each member):
+member info: lid, phone, name, role (participant/admin), last activity, activity count (when date range is given),
+
+also returns total number of participants matching the filters, "hasmore"
+
+
+### Group messages
+
+parameters:
+group ids (all/selected), filters (date range, message type - vote/message/event/etc, author, has reactions), offset, limit.
+
+Date range filter and limit have defaults.
+
+returns:
+list of messages the same way participants see them. For example, if message was edited - the final version. If it is a poll - the poll AND the votes (each option and who voted for it). If it is an event - readable representation with the attendees. Each message has an id and who sent it. If it is a reply - the id of the message it is replied to. If there are reactions - list of people who reacted and with which emojis.
+
+Also returns total number of messages matching the filters, "hasmore"
+
+### Aggregation/stats
+
+parameters:
+group ids (all/selected), participants (all/selected), date ranges (may be multiple, i.e. months or weeks), fields to return
+
+
+## Other tools
+
+TBD - post in the group, send message to the person, admin, delete, etc.

@@ -56,7 +56,8 @@ export function initAccountDb(phone: string) {
       bot_functions INTEGER NOT NULL DEFAULT 0,
       is_archived INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
-      bot_config TEXT
+      bot_config TEXT,
+      description TEXT
     );
 
     CREATE TABLE IF NOT EXISTS users (
@@ -163,6 +164,9 @@ export function initAccountDb(phone: string) {
 
   if (!groupCols.includes('bot_config')) {
     sqlite.exec('ALTER TABLE groups ADD COLUMN bot_config TEXT')
+  }
+  if (!groupCols.includes('description')) {
+    sqlite.exec('ALTER TABLE groups ADD COLUMN description TEXT')
   }
 
   currentPhone = phone

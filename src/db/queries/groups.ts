@@ -27,6 +27,7 @@ export function upsertGroupFromMetadata(meta: GroupMetadata, botJid: string, bot
   const values = {
     jid: meta.id,
     name: meta.subject,
+    description: meta.desc ?? null,
     isCommunity: meta.isCommunity ?? false,
     parentCommunityJid: meta.linkedParent ?? null,
     permissions: {

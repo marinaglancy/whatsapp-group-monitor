@@ -14,6 +14,8 @@ function bareJid(jid: string): string {
 export async function handleGroupParticipantsUpdate(event: ParticipantsUpdate, sock: WASocket) {
   if (!isAccountDbReady()) return
   const { id: groupJid, participants, action } = event
+  const actor = (event as { author?: string }).author || null
+  const eventOpts = { source: 'event' as const, actor }
   const botJid = sock.user?.id
   if (!botJid) return
 
@@ -41,7 +43,7 @@ export async function handleGroupParticipantsUpdate(event: ParticipantsUpdate, s
           logger.error({ groupJid, err }, 'Failed to sync group after bot was added')
         }
       } else {
-        upsertMembership(groupJid, p.id, membershipFromAdmin(p.admin))
+        upsertMembership(groupJid, p.id, membershipFromAdmin(p.admin), eventOpts)
         logger.debug({ groupJid, participant: p.id }, 'Participant added')
       }
     } else if (action === 'remove') {
@@ -49,7 +51,7 @@ export async function handleGroupParticipantsUpdate(event: ParticipantsUpdate, s
         logger.info({ groupJid }, 'Bot removed from group')
         updateBotMembership(groupJid, 'none')
       } else {
-        upsertMembership(groupJid, p.id, 'none')
+        upsertMembership(groupJid, p.id, 'none', eventOpts)
         logger.debug({ groupJid, participant: p.id }, 'Participant removed')
       }
     } else if (action === 'promote') {
@@ -57,7 +59,7 @@ export async function handleGroupParticipantsUpdate(event: ParticipantsUpdate, s
         logger.info({ groupJid }, 'Bot promoted in group')
         updateBotMembership(groupJid, 'admin')
       } else {
-        upsertMembership(groupJid, p.id, 'admin')
+        upsertMembership(groupJid, p.id, 'admin', eventOpts)
         logger.debug({ groupJid, participant: p.id }, 'Participant promoted')
       }
     } else if (action === 'demote') {
@@ -65,7 +67,7 @@ export async function handleGroupParticipantsUpdate(event: ParticipantsUpdate, s
         logger.info({ groupJid }, 'Bot demoted in group')
         updateBotMembership(groupJid, 'participant')
       } else {
-        upsertMembership(groupJid, p.id, 'participant')
+        upsertMembership(groupJid, p.id, 'participant', eventOpts)
         logger.debug({ groupJid, participant: p.id }, 'Participant demoted')
       }
     }

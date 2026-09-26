@@ -38,8 +38,10 @@ export const groups = sqliteTable('groups', {
   botFunctions: integer('bot_functions').notNull().default(0),
   isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
-  // last so fresh installs match DBs that gained it via ALTER TABLE (backup merges are positional-safe)
+  // these two stay last, in ALTER order, so fresh installs match DBs that gained
+  // them via migration (backup merges are positional-safe)
   botConfig: text('bot_config', { mode: 'json' }).$type<GroupBotConfig>(),
+  description: text('description'),
 })
 
 export type Group = typeof groups.$inferSelect
@@ -73,6 +75,7 @@ export const activityEventTypes = [
   'message', 'reaction', 'edit', 'delete',
   'poll_create', 'poll_vote',
   'event_create', 'event_response',
+  'member_joined', 'member_left',
 ] as const
 export type ActivityEventType = typeof activityEventTypes[number]
 
