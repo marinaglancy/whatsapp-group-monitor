@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-group-monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hosted WhatsApp group monitoring tool",
   "type": "module",
   "main": "dist/index.js",
