@@ -72,6 +72,7 @@
       <form id="download-form" method="POST" action="/backup/download">
         <input type="hidden" name="_csrf" value="{{CSRF_TOKEN}}" />
         <div id="download-items"><p class="muted">Loading...</p></div>
+        <p class="muted" style="font-size:0.8rem">A Settings backup includes everything stored on the Settings page — including API keys (e.g. the Gemini key) in readable form. Treat backup files as secrets.</p>
         <button type="submit" class="action-btn" id="download-btn" disabled>Download backup</button>
       </form>
     </div>

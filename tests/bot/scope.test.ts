@@ -91,6 +91,17 @@ describe('resolveQaScope', () => {
     expect(resolveQaScope('nope@g.us').groupJids).toEqual([])
   })
 
+  it('drops groups the bot has left from scope (Review Focus 5)', () => {
+    seedGroup('left@g.us', 'Left Group', { botMembership: 'none' })
+    seedGroup('c@g.us', 'Gamma', { parentCommunityJid: 'comm@g.us', botMembership: 'none' })
+    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['left@g.us', 'comm@g.us'] })
+    const scope = resolveQaScope('qa@g.us')
+    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us'])
+    expect(scope.entries.find(e => e.jid === 'left@g.us')).toBeUndefined()
+    const comm = scope.entries.find(e => e.jid === 'comm@g.us')!
+    expect(comm.children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])
+  })
+
   it('carries the QA group instructions', () => {
     updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'], instructions: 'Be terse.' })
     expect(resolveQaScope('qa@g.us').qaInstructions).toBe('Be terse.')

@@ -60,7 +60,11 @@ describe('bot job tables', () => {
     expect(() => db.run(ins)).not.toThrow()
   })
 
-  it('migrates an existing groups table (adds bot_config)', () => {
+  it('migrates an existing groups table (adds bot_config, same column order as fresh)', () => {
+    const colNames = () =>
+      (getAccountDb().all(sql`SELECT name FROM pragma_table_info('groups')`) as { name: string }[]).map(c => c.name)
+    // capture the fresh-install column order before switching databases
+    const freshCols = colNames()
     // close the helper-opened DB, then simulate a pre-existing old-schema DB for another phone
     closeAccountDb()
     const phone = '15550000002'
@@ -73,8 +77,11 @@ describe('bot job tables', () => {
       bot_functions INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`)
     raw.close()
     initAccountDb(phone)
-    const cols = (getAccountDb().all(sql`SELECT name FROM pragma_table_info('groups')`) as { name: string }[]).map(c => c.name)
+    const cols = colNames()
     expect(cols).toContain('bot_config')
+    // fresh installs and migrated DBs must agree on column ORDER, or the
+    // backup merge-restore between instances corrupts rows positionally
+    expect(cols).toEqual(freshCols)
     closeAccountDb()
     initAccountDb(TEST_PHONE) // restore for afterEach cleanup symmetry
   })

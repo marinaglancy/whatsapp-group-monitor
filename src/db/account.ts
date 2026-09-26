@@ -54,9 +54,9 @@ export function initAccountDb(phone: string) {
       permissions TEXT,
       bot_membership TEXT NOT NULL DEFAULT 'none',
       bot_functions INTEGER NOT NULL DEFAULT 0,
-      bot_config TEXT,
       is_archived INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      bot_config TEXT
     );
 
     CREATE TABLE IF NOT EXISTS users (

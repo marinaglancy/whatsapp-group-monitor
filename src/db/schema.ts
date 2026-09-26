@@ -36,9 +36,10 @@ export const groups = sqliteTable('groups', {
   }>(),
   botMembership: text('bot_membership', { enum: ['none', 'participant', 'admin', 'superadmin'] }).notNull().default('none'),
   botFunctions: integer('bot_functions').notNull().default(0),
-  botConfig: text('bot_config', { mode: 'json' }).$type<GroupBotConfig>(),
   isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  // last so fresh installs match DBs that gained it via ALTER TABLE (backup merges are positional-safe)
+  botConfig: text('bot_config', { mode: 'json' }).$type<GroupBotConfig>(),
 })
 
 export type Group = typeof groups.$inferSelect

@@ -38,10 +38,14 @@ export function resolveQaScope(qaGroupJid: string): QaScope {
     const g = byJid.get(jid)
     if (!g) continue
     if (g.isCommunity) {
-      const children = g.getChildren().map(c => ({ jid: c.jid, name: c.name }))
+      // only children the bot is still a member of — data stops flowing after it leaves
+      const children = g.getChildren()
+        .filter(c => c.botMembership !== 'none')
+        .map(c => ({ jid: c.jid, name: c.name }))
       entries.push({ jid: g.jid, name: g.name, isCommunity: true, children })
       for (const c of children) addGroup(c.jid, c.name)
     } else {
+      if (g.botMembership === 'none') continue // bot left this group — drop it like a vanished jid
       entries.push({ jid: g.jid, name: g.name, isCommunity: false, children: [] })
       addGroup(g.jid, g.name)
     }

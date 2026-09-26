@@ -47,7 +47,7 @@ function restoreSettings(backupDbPath: string) {
   }
 }
 
-function mergeAccountDb(phone: string, backupDbPath: string) {
+export function mergeAccountDb(phone: string, backupDbPath: string) {
   const mainDbPath = resolve(config.dataDir, phone, 'account.db')
   const db = new Database(mainDbPath)
   db.pragma('foreign_keys = OFF')
@@ -76,7 +76,13 @@ function mergeAccountDb(phone: string, backupDbPath: string) {
       WHERE jid IN (SELECT jid FROM backup.users)
     `)
 
-    db.exec(`INSERT OR IGNORE INTO groups SELECT * FROM backup.groups`)
+    // groups: schemas may differ across versions (e.g. bot_config added in an
+    // upgrade), so insert by the intersection of backup and live columns —
+    // never positionally
+    const liveGroupCols = (db.pragma('table_info(groups)') as { name: string }[]).map(c => c.name)
+    const backupGroupCols = (db.pragma('backup.table_info(groups)') as { name: string }[]).map(c => c.name)
+    const groupCols = backupGroupCols.filter(c => liveGroupCols.includes(c)).map(c => `"${c}"`).join(', ')
+    db.exec(`INSERT OR IGNORE INTO groups (${groupCols}) SELECT ${groupCols} FROM backup.groups`)
 
     // Insert new memberships; then merge timestamp fields for existing ones
     db.exec(`

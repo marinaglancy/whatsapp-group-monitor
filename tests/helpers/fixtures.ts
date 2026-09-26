@@ -1,11 +1,12 @@
 import { getAccountDb } from '../../src/db/account.js'
-import { groups, users, groupMembers, groupActivityLog, type ActivityEventType, type GroupBotConfig, membershipLevels } from '../../src/db/schema.js'
+import { groups, users, groupMembers, groupActivityLog, type ActivityEventType, type Group, type GroupBotConfig, membershipLevels } from '../../src/db/schema.js'
 
 export function seedGroup(jid: string, name: string, opts: Partial<{
   isCommunity: boolean
   parentCommunityJid: string | null
   botFunctions: number
   botConfig: GroupBotConfig | null
+  botMembership: Group['botMembership']
 }> = {}): void {
   getAccountDb().insert(groups).values({
     jid,
@@ -14,6 +15,7 @@ export function seedGroup(jid: string, name: string, opts: Partial<{
     parentCommunityJid: opts.parentCommunityJid ?? null,
     botFunctions: opts.botFunctions ?? 0,
     botConfig: opts.botConfig ?? null,
+    botMembership: opts.botMembership ?? 'participant',
   }).run()
 }
 
