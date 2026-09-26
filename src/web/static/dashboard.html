@@ -30,6 +30,7 @@
       vertical-align: baseline;
     }
     .badge-community { background: #e8f5e9; color: #2e7d32; }
+    .badge-qa { background: #e0f2f1; color: #00695c; }
     .badge-participant { background: #e3f2fd; color: #1565c0; }
     .badge-admin { background: #fff3e0; color: #e65100; }
     .badge-superadmin { background: #f3e5f5; color: #7b1fa2; }
@@ -77,6 +78,7 @@
           const link = '<a class="group-link" href="/group/' + encodeURIComponent(g.jid) + '">' + nameText + '</a>';
           const name = (indent ? '<span class="indent">' : '') + link
             + (g.isCommunity ? ' <span class="badge badge-community">community</span>' : '')
+            + (g.qaEnabled ? ' <span class="badge badge-qa">Q&amp;A</span>' : '')
             + (indent ? '</span>' : '');
           const role = g.botMembership === 'none' ? '<span class="muted">-</span>' : '<span class="badge badge-' + g.botMembership + '">' + g.botMembership + '</span>';
           const activity = g.activityCount || 0;
