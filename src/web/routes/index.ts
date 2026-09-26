@@ -94,6 +94,7 @@ export function registerRoutes(app: FastifyInstance) {
       gemini_model: getSettingOrDefault('gemini_model', DEFAULT_GEMINI_MODEL),
       ai_daily_limit: getSettingOrDefault('ai_daily_limit', String(DEFAULT_AI_DAILY_LIMIT)),
       ai_system_prompt: getAiSettings().systemPrompt,
+      ai_system_prompt_is_default: !(getSetting('ai_system_prompt') || '').trim(),
     })
   })
 

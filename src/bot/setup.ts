@@ -1,3 +1,4 @@
+import { generateMessageID } from 'baileys'
 import { registerJobHandler } from './worker.js'
 import { registerSentMessage } from './sent-registry.js'
 import { addJobEvent, hasJobEvent } from '../db/queries/jobs.js'
@@ -18,14 +19,17 @@ export async function sendJobReply(job: BotJob, text: string): Promise<string | 
     const raw = row?.raw as { key?: Record<string, unknown>; message?: Record<string, unknown> } | null
     if (raw?.key && raw?.message) quoted = { key: raw.key, message: raw.message }
   }
+  // Pre-generate and register the id BEFORE sending: Baileys echoes our own
+  // message back through messages.upsert on process.nextTick, which can beat
+  // the sendMessage promise — the trigger must already know it is ours.
+  const messageId = generateMessageID()
+  registerSentMessage(messageId)
   const sent = await sock.sendMessage(
     job.groupJid!,
     { text },
-    quoted ? { quoted: quoted as never } : undefined,
+    { messageId, ...(quoted ? { quoted: quoted as never } : {}) },
   )
-  const id = sent?.key?.id ?? null
-  if (id) registerSentMessage(id)
-  return id
+  return sent?.key?.id ?? messageId
 }
 
 /** TEMPORARY phase-2 handler: acknowledges questions with a fixed reply.

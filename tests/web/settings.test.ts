@@ -62,6 +62,14 @@ describe('/api/settings AI keys', () => {
     expect(body.ai_daily_limit).toBe('100')
   })
 
+  it('reports whether the system prompt is the shipped default', async () => {
+    expect((await get()).json().ai_system_prompt_is_default).toBe(true)
+    await post({ ai_system_prompt: 'You are a pirate.' })
+    expect((await get()).json().ai_system_prompt_is_default).toBe(false)
+    await post({ ai_system_prompt: '' }) // clearing returns to tracking the default
+    expect((await get()).json().ai_system_prompt_is_default).toBe(true)
+  })
+
   it('exposes the effective system prompt and round-trips edits', async () => {
     let body = (await get()).json()
     expect(body.ai_system_prompt).toContain('WhatsApp') // shipped default
