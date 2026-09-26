@@ -4,6 +4,8 @@ import { logger } from './utils/logger.js'
 import { initSharedDb } from './db/shared.js'
 import { startConnection } from './whatsapp/client.js'
 import { startWebServer } from './web/server.js'
+import { setupBot } from './bot/setup.js'
+import { startWorker } from './bot/worker.js'
 
 async function main() {
   mkdirSync(config.authDir, { recursive: true })
@@ -11,6 +13,8 @@ async function main() {
   logger.info('Starting WhatsApp Group Monitor...')
 
   initSharedDb()
+  setupBot()
+  startWorker()
   await startWebServer()
   await startConnection()
 }
