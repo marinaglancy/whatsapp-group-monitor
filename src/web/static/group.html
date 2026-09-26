@@ -231,18 +231,53 @@
         const res = await fetch('/api/groups');
         const all = (await res.json()).groups || [];
         const linked = new Set(group.qaLinkedJids || []);
-        const box = document.getElementById('qa-links');
-        const items = all
-          .filter(g => g.jid !== group.jid || linked.has(g.jid))
-          .sort((a, b) => (b.isCommunity - a.isCommunity) || a.name.localeCompare(b.name));
-        box.innerHTML = items.map(g =>
-          '<label style="display:block;padding:0.15rem 0"><input type="checkbox" class="qa-link" value="' + escHtml(g.jid) + '"'
+        const visible = all.filter(g => g.jid !== group.jid || linked.has(g.jid));
+        const sortName = (a, b) => a.name.localeCompare(b.name);
+        const childMap = {};
+        for (const g of visible) {
+          if (g.parentCommunityJid) {
+            (childMap[g.parentCommunityJid] = childMap[g.parentCommunityJid] || []).push(g);
+          }
+        }
+        for (const jid in childMap) childMap[jid].sort(sortName);
+        const topLevel = visible.filter(g => !g.parentCommunityJid).sort(sortName);
+        const row = (g, parentJid) =>
+          '<label style="display:block;padding:0.15rem 0' + (parentJid ? ';margin-left:1.5rem' : '') + '">'
+          + '<input type="checkbox" class="qa-link" value="' + escHtml(g.jid) + '"'
+          + (parentJid ? ' data-parent="' + escHtml(parentJid) + '"' : '')
           + (linked.has(g.jid) ? ' checked' : '') + ' /> ' + escHtml(g.name)
-          + (g.isCommunity ? ' <span class="badge" style="background:#e8f5e9;color:#2e7d32">community</span>' : '') + '</label>').join('');
+          + (g.isCommunity ? ' <span class="badge" style="background:#e8f5e9;color:#2e7d32">community</span>' : '')
+          + '</label>';
+        let html = '';
+        for (const g of topLevel) {
+          html += row(g, null);
+          for (const child of (childMap[g.jid] || [])) html += row(child, g.jid);
+        }
+        const box = document.getElementById('qa-links');
+        box.innerHTML = html;
+        // a checked community covers all its groups: children show checked + disabled
+        box.addEventListener('change', (e) => {
+          const cb = e.target.closest('input.qa-link');
+          if (cb && !cb.dataset.parent) syncCommunityChildren(cb);
+        });
+        box.querySelectorAll('input.qa-link:not([data-parent])').forEach(syncCommunityChildren);
       } catch (e) {
         document.getElementById('qa-links').innerHTML = '<span class="inactive">Failed to load groups</span>';
       }
       toggleQaConfig();
+    }
+
+    function syncCommunityChildren(cb) {
+      document.querySelectorAll('input.qa-link[data-parent="' + CSS.escape(cb.value) + '"]').forEach(child => {
+        if (cb.checked) {
+          if (!child.disabled) child.dataset.own = child.checked ? '1' : '';
+          child.checked = true;
+          child.disabled = true;
+        } else if (child.disabled) {
+          child.disabled = false;
+          child.checked = child.dataset.own === '1';
+        }
+      });
     }
 
     function toggleQaConfig() {
@@ -251,7 +286,8 @@
 
     async function saveBotConfig() {
       const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
-      const qaLinkedJids = Array.from(document.querySelectorAll('.qa-link:checked')).map(cb => cb.value);
+      // disabled children are covered by their checked community — store only the community
+      const qaLinkedJids = Array.from(document.querySelectorAll('.qa-link:checked:not(:disabled)')).map(cb => cb.value);
       const msg = document.getElementById('bot-msg');
       try {
         const res = await fetch('/api/groups/' + encodeURIComponent(groupJid) + '/bot', {
