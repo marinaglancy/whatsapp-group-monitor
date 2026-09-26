@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bot jobs &middot; {{PROJECT_NAME}}</title>
+  <meta name="csrf-token" content="{{CSRF_TOKEN}}" />
+  <link rel="stylesheet" href="/static/shared.css" />
+  <style>
+    .content { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+    .back { color: #667781; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    th, td { padding: 0.5rem 0.75rem; text-align: left; font-size: 0.85rem; }
+    th { background: #f8f9fa; color: #667781; font-weight: 600; white-space: nowrap; }
+    td { border-top: 1px solid #eee; color: #1a1a1a; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .badge { display: inline-block; padding: 0 0.4rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .st-pending { background: #fff8e1; color: #b26a00; }
+    .st-processing { background: #e3f2fd; color: #1565c0; }
+    .st-done { background: #e8f5e9; color: #2e7d32; }
+    .st-failed { background: #ffebee; color: #c62828; }
+    .st-cancelled, .st-expired { background: #eceff1; color: #607d8b; }
+    .filters { display: flex; gap: 0.5rem; margin: 1rem 0; }
+    .filters select { padding: 0.4rem; border: 1px solid #ddd; border-radius: 6px; background: white; font-size: 0.85rem; }
+    .muted { color: #999; }
+    .loading { text-align: center; padding: 2rem; color: #667781; }
+    .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; font-size: 0.85rem; color: #667781; }
+    .pagination .pages { display: flex; gap: 0.25rem; }
+    .pagination button { background: white; border: 1px solid #ddd; border-radius: 4px; padding: 0.3rem 0.6rem; cursor: pointer; font-size: 0.8rem; color: #1a1a1a; }
+    .pagination button.active { background: #25d366; color: white; border-color: #25d366; }
+    a.job-link, a.group-link { color: #1a1a1a; text-decoration: none; }
+    a.job-link:hover, a.group-link:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  {{> header}}
+  <div class="content">
+    {{> status-bar}}
+    <a class="back" href="/">&larr; Back to groups</a>
+    <h2 style="font-size:1.1rem;color:#1a1a1a;">Bot jobs</h2>
+    <div class="filters">
+      <select id="f-status" onchange="applyFilters()">
+        <option value="">Any status</option>
+        <option>pending</option><option>processing</option><option>done</option>
+        <option>failed</option><option>cancelled</option><option>expired</option>
+      </select>
+      <select id="f-type" onchange="applyFilters()">
+        <option value="">Any type</option>
+        <option>qa_answer</option>
+      </select>
+      <select id="f-group" onchange="applyFilters()"><option value="">Any group</option></select>
+    </div>
+    <div id="jobs"><p class="loading">Loading...</p></div>
+    <div id="pagination" class="pagination" style="display:none"></div>
+  </div>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    let page = parseInt(params.get('page') || '1', 10) || 1;
+
+    function applyFilters() {
+      const p = new URLSearchParams();
+      const s = document.getElementById('f-status').value;
+      const t = document.getElementById('f-type').value;
+      const g = document.getElementById('f-group').value;
+      if (s) p.set('status', s);
+      if (t) p.set('type', t);
+      if (g) p.set('group', g);
+      window.location.search = p.toString();
+    }
+
+    async function loadGroupsFilter() {
+      try {
+        const res = await fetch('/api/groups');
+        const data = await res.json();
+        const sel = document.getElementById('f-group');
+        for (const g of (data.groups || []).filter(g => !g.isCommunity).sort((a, b) => a.name.localeCompare(b.name))) {
+          const opt = document.createElement('option');
+          opt.value = g.jid;
+          opt.textContent = g.name;
+          sel.appendChild(opt);
+        }
+        sel.value = params.get('group') || '';
+      } catch (e) { /* filter stays empty */ }
+    }
+
+    async function loadJobs() {
+      try {
+        const q = new URLSearchParams(params);
+        q.set('page', String(page));
+        const res = await fetch('/api/jobs?' + q.toString());
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json();
+        if (!data.jobs.length) {
+          document.getElementById('jobs').innerHTML = '<p class="loading">No jobs yet</p>';
+          document.getElementById('pagination').style.display = 'none';
+          return;
+        }
+        let html = '<table><thead><tr><th>#</th><th>Type</th><th>Status</th><th>Group</th><th>User</th><th>Created</th><th class="num">Attempts</th><th class="num">AI calls</th><th class="num">Tokens</th><th>Result / error</th></tr></thead><tbody>';
+        for (const j of data.jobs) {
+          const status = '<span class="badge st-' + j.status + '">' + j.status + '</span>';
+          const group = j.groupJid ? '<a class="group-link" href="/group/' + encodeURIComponent(j.groupJid) + '">' + escHtml(j.groupName || j.groupJid) + '</a>' : '<span class="muted">-</span>';
+          const user = j.userJid ? '<a class="group-link" href="/user/' + encodeURIComponent(j.userJid) + '">' + escHtml(j.userJid) + '</a>' : '<span class="muted">-</span>';
+          const summary = j.error ? escHtml(j.error.split('\n')[0].slice(0, 80)) : (j.result ? escHtml(JSON.stringify(j.result).slice(0, 80)) : '<span class="muted">-</span>');
+          html += '<tr><td><a class="job-link" href="/job/' + j.id + '"><strong>' + j.id + '</strong></a></td><td>' + escHtml(j.jobType) + '</td><td>' + status + '</td><td>' + group + '</td><td>' + user + '</td><td>' + fmtTs(j.createdAt) + '</td><td class="num">' + j.attempts + '</td><td class="num">' + j.aiCalls + '</td><td class="num">' + j.tokensTotal + '</td><td>' + summary + '</td></tr>';
+        }
+        html += '</tbody></table>';
+        document.getElementById('jobs').innerHTML = html;
+        renderPagination(data.total, data.perPage);
+      } catch (e) {
+        document.getElementById('jobs').innerHTML = '<p class="loading">Failed to load jobs</p>';
+      }
+    }
+
+    function renderPagination(total, perPage) {
+      const el = document.getElementById('pagination');
+      const totalPages = Math.ceil(total / perPage);
+      if (totalPages <= 1) { el.style.display = 'none'; return; }
+      el.style.display = 'flex';
+      let html = '<span>' + total + ' jobs</span><div class="pages">';
+      let startPage = Math.max(1, page - 3), endPage = Math.min(totalPages, startPage + 6);
+      if (endPage - startPage < 6) startPage = Math.max(1, endPage - 6);
+      html += '<button onclick="goPage(' + (page - 1) + ')"' + (page <= 1 ? ' disabled' : '') + '>&laquo;</button>';
+      for (let i = startPage; i <= endPage; i++) html += '<button onclick="goPage(' + i + ')"' + (i === page ? ' class="active"' : '') + '>' + i + '</button>';
+      html += '<button onclick="goPage(' + (page + 1) + ')"' + (page >= totalPages ? ' disabled' : '') + '>&raquo;</button></div>';
+      el.innerHTML = html;
+    }
+    function goPage(p) { page = p; loadJobs(); }
+    function fmtTs(ms) { return ms ? new Date(ms).toISOString().replace('T', ' ').slice(0, 19) : '-'; }
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+    document.getElementById('f-status').value = params.get('status') || '';
+    document.getElementById('f-type').value = params.get('type') || '';
+    loadGroupsFilter();
+    loadJobs();
+  </script>
+  <script src="/static/shared.js"></script>
+</body>
+</html>

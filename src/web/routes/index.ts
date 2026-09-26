@@ -274,6 +274,16 @@ export function registerRoutes(app: FastifyInstance) {
     return reply.send({ user, memberships: rows })
   })
 
+  app.get('/jobs', { preHandler: requireAuth }, async (req, reply) => {
+    generateCsrf(req)
+    return sendPage(reply, 'jobs.html', req)
+  })
+
+  app.get('/job/:id', { preHandler: requireAuth }, async (req, reply) => {
+    generateCsrf(req)
+    return sendPage(reply, 'job.html', req)
+  })
+
   app.get('/api/jobs', { preHandler: requireAuthApi }, async (req, reply) => {
     if (!isAccountDbReady()) {
       return reply.send({ jobs: [], total: 0, page: 1, perPage: 0 })

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job &middot; {{PROJECT_NAME}}</title>
+  <meta name="csrf-token" content="{{CSRF_TOKEN}}" />
+  <link rel="stylesheet" href="/static/shared.css" />
+  <style>
+    .content { max-width: 1100px; margin: 2rem auto; padding: 0 1rem; }
+    .back { color: #667781; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    .card { background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    .props { display: grid; grid-template-columns: 160px 1fr; gap: 0.35rem 1rem; font-size: 0.85rem; margin: 0; }
+    .props dt { color: #667781; }
+    .props dd { margin: 0; color: #1a1a1a; overflow-wrap: anywhere; }
+    .badge { display: inline-block; padding: 0 0.4rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+    .st-pending { background: #fff8e1; color: #b26a00; }
+    .st-processing { background: #e3f2fd; color: #1565c0; }
+    .st-done { background: #e8f5e9; color: #2e7d32; }
+    .st-failed { background: #ffebee; color: #c62828; }
+    .st-cancelled, .st-expired { background: #eceff1; color: #607d8b; }
+    .event { border-top: 1px solid #eee; padding: 0.6rem 0; font-size: 0.85rem; }
+    .event .etype { font-weight: 600; color: #1a1a1a; }
+    .event .etime { color: #999; font-size: 0.75rem; margin-left: 0.5rem; }
+    pre { background: #f8f9fa; border-radius: 6px; padding: 0.6rem; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0.4rem 0 0; }
+    details > summary { cursor: pointer; color: #667781; font-size: 0.8rem; }
+    .loading { text-align: center; padding: 2rem; color: #667781; }
+    a { color: #1a1a1a; }
+  </style>
+</head>
+<body>
+  {{> header}}
+  <div class="content">
+    {{> status-bar}}
+    <a class="back" href="/jobs">&larr; Back to jobs</a>
+    <div id="job-detail"><p class="loading">Loading...</p></div>
+  </div>
+  <script>
+    const jobId = window.location.pathname.split('/job/')[1];
+
+    async function load() {
+      try {
+        const res = await fetch('/api/jobs/' + encodeURIComponent(jobId));
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        if (!res.ok) { document.getElementById('job-detail').innerHTML = '<p class="loading">Job not found</p>'; return; }
+        const { job, events, groupName, userName } = await res.json();
+        const fmt = (ms) => ms ? new Date(ms).toISOString().replace('T', ' ').slice(0, 19) : '-';
+        const fmtS = (s) => s ? new Date(s * 1000).toISOString().replace('T', ' ').slice(0, 19) : '-';
+        let html = '<div class="card"><h2 style="font-size:1.05rem;margin:0 0 0.75rem">Job #' + job.id + ' &middot; ' + escHtml(job.jobType)
+          + ' <span class="badge st-' + job.status + '">' + job.status + '</span></h2><dl class="props">'
+          + row('Group', job.groupJid ? link('/group/' + encodeURIComponent(job.groupJid), groupName || job.groupJid) : '-')
+          + row('User', job.userJid ? link('/user/' + encodeURIComponent(job.userJid), userName || job.userJid) : '-')
+          + row('Source message', escHtml(job.messageId || '-'))
+          + row('Created', fmt(job.createdAt)) + row('Updated', fmt(job.updatedAt))
+          + row('Run at', fmtS(job.runAt)) + row('Expires at', fmtS(job.expiresAt))
+          + row('Attempts', job.attempts)
+          + row('AI calls', job.aiCalls)
+          + row('Tokens', job.aiTokensIn + ' in / ' + job.aiTokensOut + ' out / ' + (job.aiTokensIn + job.aiTokensOut) + ' total')
+          + '</dl>'
+          + (job.payload ? '<details open><summary>Payload</summary><pre>' + escHtml(JSON.stringify(job.payload, null, 2)) + '</pre></details>' : '')
+          + (job.result ? '<details open><summary>Result</summary><pre>' + escHtml(JSON.stringify(job.result, null, 2)) + '</pre></details>' : '')
+          + (job.error ? '<details open><summary>Error</summary><pre>' + escHtml(job.error) + '</pre></details>' : '')
+          + '</div>';
+        html += '<div class="card"><h3 style="font-size:0.95rem;margin:0">Events (' + events.length + ')</h3>';
+        for (const e of events) {
+          const openAttr = (e.eventType === 'ai_call' || e.eventType === 'tool_call') ? '' : ' open';
+          html += '<div class="event"><span class="etype">' + escHtml(e.eventType) + '</span><span class="etime">' + fmt(e.createdAt) + '</span>'
+            + (e.messageId ? ' <span class="etime">msg: ' + escHtml(e.messageId) + '</span>' : '')
+            + (e.data ? '<details' + openAttr + '><summary>data</summary><pre>' + escHtml(JSON.stringify(e.data, null, 2)) + '</pre></details>' : '')
+            + '</div>';
+        }
+        html += '</div>';
+        document.getElementById('job-detail').innerHTML = html;
+      } catch (err) {
+        document.getElementById('job-detail').innerHTML = '<p class="loading">Failed to load job</p>';
+      }
+    }
+    function row(k, v) { return '<dt>' + k + '</dt><dd>' + v + '</dd>'; }
+    function link(href, text) { return '<a href="' + href + '">' + escHtml(text) + '</a>'; }
+    function escHtml(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+    load();
+  </script>
+  <script src="/static/shared.js"></script>
+</body>
+</html>
