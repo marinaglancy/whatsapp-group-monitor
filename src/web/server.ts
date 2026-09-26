@@ -43,8 +43,7 @@ export function cleanupTmpUploads() {
   } catch { /* dir may not exist yet */ }
 }
 
-export async function startWebServer() {
-  cleanupTmpUploads()
+export async function createApp() {
   const app = Fastify({ logger: false })
 
   await app.register(fastifyFormbody)
@@ -67,7 +66,12 @@ export async function startWebServer() {
   })
 
   registerRoutes(app)
+  return app
+}
 
+export async function startWebServer() {
+  cleanupTmpUploads()
+  const app = await createApp()
   await app.listen({ port: config.port, host: config.host })
   logger.info(`Web server listening on http://${config.host}:${config.port}`)
 }

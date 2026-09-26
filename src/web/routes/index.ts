@@ -5,7 +5,8 @@ import { sendPage } from '../server.js'
 import { getCurrentQr, getConnectionState, getBotUser } from '../../whatsapp/handlers/connection.js'
 import { getSock } from '../../whatsapp/client.js'
 import { requireAuth, requireAuthApi, generateCsrf, verifyCsrf } from '../middleware/auth.js'
-import { getSettingOrDefault, setSetting } from '../../db/queries/settings.js'
+import { getSetting, getSettingOrDefault, setSetting } from '../../db/queries/settings.js'
+import { DEFAULT_GEMINI_MODEL, DEFAULT_AI_DAILY_LIMIT } from '../../ai/settings.js'
 import { getAllGroups, getGroup } from '../../db/queries/groups.js'
 import { GroupRecord } from '../../whatsapp/group/record.js'
 import { isAccountDbReady } from '../../db/account.js'
@@ -86,6 +87,9 @@ export function registerRoutes(app: FastifyInstance) {
     return reply.send({
       project_name: getSettingOrDefault('project_name', 'WhatsApp Group Monitor'),
       page_size: getSettingOrDefault('page_size', '50'),
+      gemini_api_key_set: !!getSetting('gemini_api_key'),
+      gemini_model: getSettingOrDefault('gemini_model', DEFAULT_GEMINI_MODEL),
+      ai_daily_limit: getSettingOrDefault('ai_daily_limit', String(DEFAULT_AI_DAILY_LIMIT)),
     })
   })
 
@@ -94,11 +98,15 @@ export function registerRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: 'Invalid CSRF token' })
     }
     const body = req.body as Record<string, string>
-    const allowed = ['project_name', 'page_size']
+    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit']
     for (const key of allowed) {
       if (key in body && typeof body[key] === 'string') {
         setSetting(key, body[key])
       }
+    }
+    // API key is write-only: non-empty replaces, empty string clears, omission keeps
+    if ('gemini_api_key' in body && typeof body.gemini_api_key === 'string') {
+      setSetting('gemini_api_key', body.gemini_api_key)
     }
     return reply.send({ ok: true })
   })
