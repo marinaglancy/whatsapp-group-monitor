@@ -12,6 +12,8 @@ import { GroupRecord } from '../../whatsapp/group/record.js'
 import { isAccountDbReady } from '../../db/account.js'
 import { jidNormalizedUser } from 'baileys'
 import { getUser } from '../../db/queries/users.js'
+import { listJobs, getJob, getJobEvents } from '../../db/queries/jobs.js'
+import { botJobStatuses, type BotJobStatus } from '../../db/schema.js'
 import { getUserGroupMemberships } from '../../db/queries/members.js'
 import { getUserActivityPerGroup } from '../../db/queries/activity.js'
 import { registerBackupRoutes } from './backup.js'
@@ -270,6 +272,49 @@ export function registerRoutes(app: FastifyInstance) {
     }
 
     return reply.send({ user, memberships: rows })
+  })
+
+  app.get('/api/jobs', { preHandler: requireAuthApi }, async (req, reply) => {
+    if (!isAccountDbReady()) {
+      return reply.send({ jobs: [], total: 0, page: 1, perPage: 0 })
+    }
+    const q = req.query as Record<string, string | undefined>
+    const perPage = parseInt(getSettingOrDefault('page_size', '50'), 10) || 50
+    const page = Math.max(1, parseInt(q.page || '1', 10) || 1)
+    const status = botJobStatuses.includes(q.status as BotJobStatus) ? q.status as BotJobStatus : undefined
+    const { jobs, total } = listJobs({
+      status,
+      jobType: q.type || undefined,
+      groupJid: q.group || undefined,
+      limit: perPage,
+      offset: (page - 1) * perPage,
+    })
+    const nameByJid = new Map(getAllGroups().map(g => [g.jid, g.name]))
+    return reply.send({
+      jobs: jobs.map(j => ({
+        ...j,
+        groupName: j.groupJid ? nameByJid.get(j.groupJid) ?? null : null,
+        tokensTotal: j.aiTokensIn + j.aiTokensOut,
+      })),
+      total,
+      page,
+      perPage,
+    })
+  })
+
+  app.get('/api/jobs/:id', { preHandler: requireAuthApi }, async (req, reply) => {
+    if (!isAccountDbReady()) return reply.status(503).send({ error: 'Not connected' })
+    const idNum = parseInt((req.params as { id: string }).id, 10)
+    if (Number.isNaN(idNum)) return reply.status(400).send({ error: 'Invalid job id' })
+    const job = getJob(idNum)
+    if (!job) return reply.status(404).send({ error: 'Job not found' })
+    const nameByJid = new Map(getAllGroups().map(g => [g.jid, g.name]))
+    return reply.send({
+      job,
+      events: getJobEvents(job.id),
+      groupName: job.groupJid ? nameByJid.get(job.groupJid) ?? null : null,
+      userName: job.userJid ? getUser(job.userJid)?.displayName ?? null : null,
+    })
   })
 
   app.get('/api/status', { preHandler: requireAuthApi }, async (_req, reply) => {
