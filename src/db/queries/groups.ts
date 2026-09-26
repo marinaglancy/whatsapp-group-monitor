@@ -1,7 +1,7 @@
 import { eq, notInArray } from 'drizzle-orm'
 import type { GroupMetadata, GroupParticipant } from 'baileys'
 import { getAccountDb } from '../account.js'
-import { groups, type Group } from '../schema.js'
+import { groups, BOT_FUNCTION_QA, type Group, type GroupBotConfig } from '../schema.js'
 import { GroupRecord } from '../../whatsapp/group/record.js'
 
 function bareId(jid: string): string {
@@ -57,6 +57,28 @@ export function getAllGroups(): GroupRecord[] {
 
 export function getGroup(jid: string): GroupRecord | null {
   return getAllGroups().find(g => g.jid === jid) ?? null
+}
+
+export const QA_INSTRUCTIONS_MAX = 4_000
+
+/** Write the `qa` namespace of bot_config; other namespaces are preserved. */
+export function updateGroupQaConfig(groupJid: string, opts: { enabled: boolean; linkedJids: string[]; instructions?: string | null }): void {
+  const db = getAccountDb()
+  const row = db.select({ botFunctions: groups.botFunctions, botConfig: groups.botConfig })
+    .from(groups).where(eq(groups.jid, groupJid)).get()
+  if (!row) throw new Error(`Group not found: ${groupJid}`)
+  const botFunctions = opts.enabled
+    ? row.botFunctions | BOT_FUNCTION_QA
+    : row.botFunctions & ~BOT_FUNCTION_QA
+  const instructions = opts.instructions?.trim()
+  const botConfig: GroupBotConfig = {
+    ...(row.botConfig ?? {}),
+    qa: {
+      linkedJids: opts.linkedJids,
+      ...(instructions ? { instructions } : {}),
+    },
+  }
+  db.update(groups).set({ botFunctions, botConfig }).where(eq(groups.jid, groupJid)).run()
 }
 
 export function updateBotMembership(groupJid: string, membership: Group['botMembership']) {
