@@ -55,7 +55,9 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
       return staticReply(job, deps, 'The AI assistant is not configured yet — an API key is missing in the settings.')
     }
     const scope = resolveQaScope(job.groupJid)
-    if (!scope.entries.some(e => !e.isSelf)) {
+    // no reachable group beyond the question group itself (nothing linked, or
+    // only vanished groups / childless communities): tell the admin, spend nothing
+    if (!scope.groupJids.some(j => j !== job.groupJid)) {
       return staticReply(job, deps, 'No groups are linked for me to report on yet. Link groups or a community on the group page in the admin panel.')
     }
 
@@ -100,7 +102,7 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
       })
 
       if (resp.toolCalls?.length) {
-        messages.push({ role: 'assistant', text: resp.text, toolCalls: resp.toolCalls })
+        messages.push({ role: 'assistant', text: resp.text, toolCalls: resp.toolCalls, raw: resp.raw })
         for (const call of resp.toolCalls) {
           const executed = executeQaTool(call.name, call.args, { scope, timezone: settings.timezone, nowMs: now })
           addJobEvent(job.id, 'tool_call', {
@@ -167,9 +169,11 @@ async function staticReply(job: BotJob, deps: QaResponderDeps, text: string): Pr
 async function checkDailyLimit(job: BotJob, deps: QaResponderDeps, limit: number, now: () => number): Promise<void> {
   if (limit <= 0) return
   if (sumAiCallsToday(now()) < limit) return
+  // Always record the cause on the job (this also keeps the failure notifier
+  // silent for it); the group message itself is throttled to once per hour.
+  addJobEvent(job.id, 'limit_notice', { groupJid: job.groupJid })
   if (now() - lastLimitNoticeAt >= LIMIT_NOTICE_INTERVAL_MS) {
     lastLimitNoticeAt = now()
-    addJobEvent(job.id, 'limit_notice', { groupJid: job.groupJid })
     try {
       await deps.sendReply(job, `⚠️ The daily AI usage limit (${limit} calls) is reached. Try again tomorrow, or raise the limit in the settings.`)
     } catch (err) {

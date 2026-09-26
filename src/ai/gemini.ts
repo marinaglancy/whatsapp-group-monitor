@@ -18,16 +18,32 @@ export interface GeminiResponseShape {
 
 export function toGeminiContents(messages: AiChatMessage[]): GeminiContent[] {
   const contents: GeminiContent[] = []
-  for (const m of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]
     if (m.role === 'user') {
       contents.push({ role: 'user', parts: [{ text: m.text }] })
     } else if (m.role === 'assistant') {
+      // Prefer the provider's own content: Gemini functionCall parts carry
+      // thought signatures the API requires back verbatim (400 otherwise).
+      if (m.raw && typeof m.raw === 'object') {
+        contents.push(m.raw as GeminiContent)
+        continue
+      }
       const parts: Record<string, unknown>[] = []
       if (m.text) parts.push({ text: m.text })
       for (const tc of m.toolCalls ?? []) parts.push({ functionCall: { name: tc.name, args: tc.args } })
       contents.push({ role: 'model', parts })
     } else {
-      contents.push({ role: 'user', parts: [{ functionResponse: { name: m.name, response: { result: m.result } } }] })
+      // All results answering one model turn must arrive as ONE user content
+      // with a functionResponse part per call, in call order.
+      const parts: Record<string, unknown>[] = []
+      while (i < messages.length && messages[i].role === 'tool') {
+        const t = messages[i] as Extract<AiChatMessage, { role: 'tool' }>
+        parts.push({ functionResponse: { name: t.name, response: { result: t.result } } })
+        i++
+      }
+      i--
+      contents.push({ role: 'user', parts })
     }
   }
   return contents
@@ -72,7 +88,16 @@ export function createGeminiProvider(opts: { apiKey: string; model: string }): A
           ...(req.tools.length ? { tools: toGeminiTools(req.tools) } : {}),
         },
       })
-      return fromGeminiResponse(response as unknown as GeminiResponseShape)
+      // Read functionCalls first: the .text getter warns to the console when
+      // the response mixes text and functionCall parts.
+      const functionCalls = response.functionCalls
+      const mapped = fromGeminiResponse({
+        text: functionCalls?.length ? undefined : response.text,
+        functionCalls,
+        usageMetadata: response.usageMetadata,
+      })
+      const rawContent = response.candidates?.[0]?.content
+      return rawContent ? { ...mapped, raw: rawContent } : mapped
     },
   }
 }

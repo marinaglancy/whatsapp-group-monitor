@@ -18,6 +18,38 @@ describe('toGeminiContents', () => {
   })
 })
 
+describe('toGeminiContents: provider raw echo', () => {
+  it('echoes the raw model content verbatim for assistant turns (preserves thought signatures)', () => {
+    const raw = {
+      role: 'model',
+      parts: [{ functionCall: { name: 'group_list', args: {} }, thoughtSignature: 'SIG123' }],
+    }
+    const contents = toGeminiContents([
+      { role: 'user', text: 'q' },
+      { role: 'assistant', toolCalls: [{ name: 'group_list', args: {} }], raw },
+    ])
+    expect(contents[1]).toBe(raw)
+  })
+
+  it('coalesces consecutive tool results into one user turn with multiple functionResponse parts', () => {
+    const contents = toGeminiContents([
+      { role: 'tool', name: 'a', result: '1' },
+      { role: 'tool', name: 'b', result: '2' },
+      { role: 'user', text: 'next' },
+    ])
+    expect(contents).toEqual([
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { name: 'a', response: { result: '1' } } },
+          { functionResponse: { name: 'b', response: { result: '2' } } },
+        ],
+      },
+      { role: 'user', parts: [{ text: 'next' }] },
+    ])
+  })
+})
+
 describe('toGeminiTools', () => {
   it('passes parameters and responseJsonSchema through to function declarations', () => {
     const params = { type: 'object', properties: { limit: { type: 'integer' } } }

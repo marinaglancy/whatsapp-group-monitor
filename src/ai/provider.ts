@@ -17,7 +17,10 @@ export interface AiToolCall {
 
 export type AiChatMessage =
   | { role: 'user'; text: string }
-  | { role: 'assistant'; text?: string; toolCalls?: AiToolCall[] }
+  /** `raw` is the provider's own content for this turn, echoed back verbatim
+   *  in history — Gemini function calls carry thought signatures that must
+   *  survive the round-trip. Opaque outside the provider. */
+  | { role: 'assistant'; text?: string; toolCalls?: AiToolCall[]; raw?: unknown }
   | { role: 'tool'; name: string; result: string }
 
 export interface AiUsage {
@@ -29,6 +32,8 @@ export interface AiResponse {
   text?: string
   toolCalls?: AiToolCall[]
   usage: AiUsage
+  /** Provider-native content of this turn; pass back on the next assistant message. */
+  raw?: unknown
 }
 
 export interface AiProvider {

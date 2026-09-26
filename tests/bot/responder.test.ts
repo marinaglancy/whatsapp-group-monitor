@@ -81,6 +81,17 @@ describe('qa_answer handler', () => {
     expect(fresh.aiTokensOut).toBe(30)
   })
 
+  it('passes the provider raw content back on assistant turns (thought signatures)', async () => {
+    const raw = { role: 'model', parts: [{ functionCall: { name: 'group_list', args: {} }, thoughtSignature: 'SIG' }] }
+    const provider = fakeProvider([
+      { toolCalls: [{ name: 'group_list', args: {} }], raw },
+      { text: 'done' },
+    ])
+    await makeHandler(provider)(makeJob())
+    const assistantTurn = provider.calls[1].messages.find(m => m.role === 'assistant') as { raw?: unknown }
+    expect(assistantTurn.raw).toBe(raw)
+  })
+
   it('expands placeholders in tools and identifies the bot account in the system prompt', async () => {
     setSetting('timezone', 'Europe/Lisbon')
     const provider = fakeProvider([{ text: 'ok' }])
@@ -112,6 +123,13 @@ describe('qa_answer handler', () => {
     expect(text).toContain('asker 4917612345678 Anna') // asker person string
     expect(text).not.toContain(job.messageId!) // the question is not duplicated inside the context block
     expect(text).not.toMatch(/Q&A/i)
+    expect(text).toMatch(/Asked at: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)
+    // epoch numbers must never surface in model-visible text
+    const questionTs = NOW_S - 5
+    for (const blob of [text, provider.calls[0].system]) {
+      expect(blob).not.toContain(String(questionTs))
+      expect(blob).not.toContain(String(questionTs * 1000))
+    }
   })
 
   it('limits the recent context block to the last 48 hours', async () => {
@@ -189,6 +207,15 @@ describe('qa_answer handler', () => {
     expect(sent[0].text).toMatch(/no groups are linked/i)
   })
 
+  it('replies statically when the only link is a community with no reachable groups', async () => {
+    seedGroup('empty-comm@g.us', 'Ghost Town', { isCommunity: true })
+    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['empty-comm@g.us'] })
+    const provider = fakeProvider([])
+    await makeHandler(provider)(makeJob())
+    expect(provider.calls.length).toBe(0)
+    expect(sent[0].text).toMatch(/no groups are linked/i)
+  })
+
   it('does not double-send after a crash between send and completion', async () => {
     const job = makeJob()
     addJobEvent(job.id, 'reply_sent', { messageId: 'OLD' })
@@ -206,9 +233,15 @@ describe('qa_answer handler', () => {
     const provider = fakeProvider([])
     await expect(makeHandler(provider)(makeJob('q1'))).rejects.toThrow(/daily/i)
     expect(sent.length).toBe(1) // the notice
-    await expect(makeHandler(provider)(makeJob('q2'))).rejects.toThrow(/daily/i)
+    const q2 = makeJob('q2')
+    await expect(makeHandler(provider)(q2)).rejects.toThrow(/daily/i)
     expect(sent.length).toBe(1) // throttled: no second notice within the hour
     expect(provider.calls.length).toBe(0)
+    // ...but the throttled job still records WHY it failed, so the failure
+    // notifier stays silent instead of sending a misleading generic apology
+    const notify = buildQaFailureNotifier({ sendReply: async (job, text) => { sent.push({ text, jobId: job.id }); return null } })
+    await notify(getJob(q2.id)!, 'Daily AI call limit reached (3)')
+    expect(sent.length).toBe(1)
   })
 
   it('stops mid-loop when the limit is crossed by its own calls', async () => {
