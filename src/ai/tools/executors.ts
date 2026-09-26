@@ -378,6 +378,7 @@ const executors: Record<string, Executor> = {
       group_name: ctx.scope.names.get(h.groupJid) ?? h.groupJid,
       sent_at: formatDateTime(h.timestamp, ctx.timezone),
       author: { lid: h.authorLid, ...(users.get(h.authorLid)?.name ? { name: users.get(h.authorLid)!.name } : {}) },
+      type: h.type,
       snippet: h.snippet,
     }))
     return paginate('hits', rows, total, offset)

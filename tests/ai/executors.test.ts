@@ -195,6 +195,7 @@ describe('message_search', () => {
     expect(out.hits[0].id).toBe('M1')
     expect(out.hits[0].group_name).toBe('Alpha')
     expect(out.hits[0].author).toEqual({ lid: ANNA, name: 'Anna' })
+    expect(out.hits[0].type).toBe('message')
     expect(out.hits[0].sent_at).toMatch(/^2026-09-15 /)
     expect(run('message_search', { query: ['secret'] }, ctx).total).toBe(0)
   })

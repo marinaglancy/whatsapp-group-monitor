@@ -238,6 +238,7 @@ describe('qSearchMessages', () => {
     const { hits, total } = qSearchMessages({ groupJids: A }, { query: ['picnic plan'], from: 0, to: 100_000, order: 'desc', limit: 20, offset: 0 })
     expect(total).toBe(1)
     expect(hits[0].messageId).toBe('M2') // hit may come from the edit row, resolved to M2
+    expect(hits[0].type).toBe('message')
     expect(hits[0].snippet).toContain('picnic')
   })
 

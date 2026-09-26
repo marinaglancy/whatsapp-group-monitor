@@ -885,6 +885,15 @@
                   "lid"
                 ]
               },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "message",
+                  "poll",
+                  "event"
+                ],
+                "description": "What kind of item matched."
+              },
               "snippet": {
                 "type": "string",
                 "description": "Short excerpt around the match."
@@ -896,7 +905,8 @@
               "group_name",
               "sent_at",
               "snippet",
-              "author"
+              "author",
+              "type"
             ]
           }
         },

@@ -553,6 +553,7 @@ export interface QaSearchHit {
   groupJid: string
   authorLid: string
   timestamp: number
+  type: 'message' | 'poll' | 'event'
   snippet: string
 }
 
@@ -590,7 +591,7 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
   const total = db.get<{ cnt: number }>(sql`SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
   const rows = db.all<Record<string, unknown>>(sql`
     SELECT t.message_id AS message_id, t.group_jid AS group_jid, t.user_jid AS user_jid, t.timestamp AS ts,
-           json_extract(h.metadata, '$.text') AS hit_text
+           t.event_type AS etype, json_extract(h.metadata, '$.text') AS hit_text
     ${joins}
     GROUP BY t.id
     ORDER BY t.timestamp ${dir}, t.id ${dir}
@@ -602,6 +603,7 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
       groupJid: r.group_jid as string,
       authorLid: r.user_jid as string,
       timestamp: r.ts as number,
+      type: KIND_BY_BASE_TYPE[r.etype as string],
       snippet: makeSnippet((r.hit_text as string | null) ?? '', opts.query),
     })),
     total,
