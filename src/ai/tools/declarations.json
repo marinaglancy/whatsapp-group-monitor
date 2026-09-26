@@ -2,7 +2,7 @@
   {
     "name": "group_list",
     "_category": "group",
-    "description": "Details about the groups you can report on: descriptions, member counts, the bot's role and posting permissions, last activity, join approval. The group names, jids and data-since dates are already in your instructions — call this only for these extra fields.",
+    "description": "Additional information about the groups you can report on and the bot's permissions in them.",
     "parameters": {
       "type": "object",
       "properties": {
