@@ -3,7 +3,7 @@ import { setupTestDbs } from '../helpers/db.js'
 import {
   insertJob, getJob, getDueJob, markJobProcessing, completeJob, failJob, requeueJob,
   markJobExpired, requeueOrphanedJobs, addJobAiUsage, sumAiCallsToday,
-  addJobEvent, getJobEvents, hasJobEvent, listJobs,
+  addJobEvent, getJobEvents, hasJobEvent, listJobs, listJobGroups,
 } from '../../src/db/queries/jobs.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
@@ -117,6 +117,14 @@ describe('job store', () => {
     expect(events[2].messageId).toBe('R9')
     expect(hasJobEvent(id, 'reply_sent')).toBe(true)
     expect(hasJobEvent(id, 'dm_sent')).toBe(false)
+  })
+
+  it('lists the distinct groups that have jobs', () => {
+    makeJob({ groupJid: 'g1@g.us', messageId: 'A' })
+    makeJob({ groupJid: 'g1@g.us', messageId: 'B' })
+    makeJob({ groupJid: 'g2@g.us', messageId: 'C' })
+    makeJob({ groupJid: null, messageId: 'D' })
+    expect(listJobGroups()).toEqual(['g1@g.us', 'g2@g.us'])
   })
 
   it('lists jobs with filters, paging and total', () => {

@@ -156,6 +156,17 @@ export function hasJobEvent(jobId: number, eventType: string): boolean {
     .limit(1).get()
 }
 
+/** Distinct groups that have at least one job — the jobs page filter source. */
+export function listJobGroups(): string[] {
+  const db = getAccountDb()
+  const rows = db.select({ groupJid: botJobs.groupJid }).from(botJobs)
+    .where(sql`${botJobs.groupJid} IS NOT NULL`)
+    .groupBy(botJobs.groupJid)
+    .orderBy(botJobs.groupJid)
+    .all()
+  return rows.map(r => r.groupJid as string)
+}
+
 export interface ListJobsFilters {
   status?: BotJobStatus
   jobType?: string

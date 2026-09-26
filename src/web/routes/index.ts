@@ -12,7 +12,7 @@ import { GroupRecord } from '../../whatsapp/group/record.js'
 import { isAccountDbReady } from '../../db/account.js'
 import { jidNormalizedUser } from 'baileys'
 import { getUser } from '../../db/queries/users.js'
-import { listJobs, getJob, getJobEvents } from '../../db/queries/jobs.js'
+import { listJobs, getJob, getJobEvents, listJobGroups } from '../../db/queries/jobs.js'
 import { botJobStatuses, type BotJobStatus } from '../../db/schema.js'
 import { getUserGroupMemberships } from '../../db/queries/members.js'
 import { getUserActivityPerGroup } from '../../db/queries/activity.js'
@@ -323,6 +323,7 @@ export function registerRoutes(app: FastifyInstance) {
         userName: j.userJid ? userNameByJid.get(j.userJid) ?? null : null,
         tokensTotal: j.aiTokensIn + j.aiTokensOut,
       })),
+      groups: listJobGroups().map(jid => ({ jid, name: nameByJid.get(jid) ?? jid })),
       total,
       page,
       perPage,

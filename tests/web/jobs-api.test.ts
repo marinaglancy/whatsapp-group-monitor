@@ -32,6 +32,8 @@ describe('/api/jobs', () => {
     const body = (await get('/api/jobs')).json()
     expect(body.total).toBe(2)
     expect(body.jobs[0].id).toBe(j2)
+    // filter dropdown source: only groups that actually have jobs
+    expect(body.groups).toEqual([{ jid: 'qa@g.us', name: 'Admins' }])
     expect(body.jobs[1].tokensTotal).toBe(130)
     expect(body.jobs[1].groupName).toBe('Admins')
     expect(body.jobs[1].userName).toBe('Anna') // spec §7: display name in the list

@@ -69,19 +69,18 @@
       window.location.search = p.toString();
     }
 
-    async function loadGroupsFilter() {
-      try {
-        const res = await fetch('/api/groups');
-        const data = await res.json();
-        const sel = document.getElementById('f-group');
-        for (const g of (data.groups || []).filter(g => !g.isCommunity).sort((a, b) => a.name.localeCompare(b.name))) {
-          const opt = document.createElement('option');
-          opt.value = g.jid;
-          opt.textContent = g.name;
-          sel.appendChild(opt);
-        }
-        sel.value = params.get('group') || '';
-      } catch (e) { /* filter stays empty */ }
+    let groupFilterLoaded = false;
+    function populateGroupsFilter(groups) {
+      if (groupFilterLoaded) return;
+      groupFilterLoaded = true;
+      const sel = document.getElementById('f-group');
+      for (const g of (groups || []).sort((a, b) => a.name.localeCompare(b.name))) {
+        const opt = document.createElement('option');
+        opt.value = g.jid;
+        opt.textContent = g.name;
+        sel.appendChild(opt);
+      }
+      sel.value = params.get('group') || '';
     }
 
     async function loadJobs() {
@@ -91,6 +90,7 @@
         const res = await fetch('/api/jobs?' + q.toString());
         if (res.status === 401) { window.location.href = '/login'; return; }
         const data = await res.json();
+        populateGroupsFilter(data.groups); // only groups that actually have jobs
         if (!data.jobs.length) {
           document.getElementById('jobs').innerHTML = '<p class="loading">No jobs yet</p>';
           document.getElementById('pagination').style.display = 'none';
@@ -131,7 +131,6 @@
 
     document.getElementById('f-status').value = params.get('status') || '';
     document.getElementById('f-type').value = params.get('type') || '';
-    loadGroupsFilter();
     loadJobs();
   </script>
   <script src="/static/shared.js"></script>
