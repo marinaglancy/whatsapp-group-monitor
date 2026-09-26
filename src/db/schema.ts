@@ -10,6 +10,19 @@ export const settings = sqliteTable('settings', {
 
 // --- Account DB (account.db) ---
 
+/** Per-group bot function settings, namespaced per function.
+ *  v1 uses only `qa`; stage-2 namespaces get their real shapes when those
+ *  features are designed — new fields need no migration. */
+export interface GroupBotConfig {
+  qa?: {
+    linkedJids?: string[]
+    instructions?: string
+  }
+  /** Reserved for stage 2+; loosely typed until designed. */
+  spam?: Record<string, unknown>
+  join?: Record<string, unknown>
+}
+
 export const groups = sqliteTable('groups', {
   jid: text('jid').primaryKey(),
   name: text('name').notNull(),
@@ -23,6 +36,7 @@ export const groups = sqliteTable('groups', {
   }>(),
   botMembership: text('bot_membership', { enum: ['none', 'participant', 'admin', 'superadmin'] }).notNull().default('none'),
   botFunctions: integer('bot_functions').notNull().default(0),
+  botConfig: text('bot_config', { mode: 'json' }).$type<GroupBotConfig>(),
   isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
 })
@@ -75,3 +89,44 @@ export const groupActivityLog = sqliteTable('group_activity_log', {
 })
 
 export type GroupActivityRow = typeof groupActivityLog.$inferSelect
+
+/** groups.botFunctions bit flags */
+export const BOT_FUNCTION_QA = 1
+
+export const botJobStatuses = ['pending', 'processing', 'done', 'failed', 'cancelled', 'expired'] as const
+export type BotJobStatus = typeof botJobStatuses[number]
+
+export const botJobs = sqliteTable('bot_jobs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  jobType: text('job_type').notNull(),
+  groupJid: text('group_jid'),
+  userJid: text('user_jid'),
+  messageId: text('message_id'),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>(),
+  status: text('status', { enum: botJobStatuses }).notNull().default('pending'),
+  runAt: integer('run_at').notNull(),
+  expiresAt: integer('expires_at'),
+  attempts: integer('attempts').notNull().default(0),
+  aiCalls: integer('ai_calls').notNull().default(0),
+  aiTokensIn: integer('ai_tokens_in').notNull().default(0),
+  aiTokensOut: integer('ai_tokens_out').notNull().default(0),
+  result: text('result', { mode: 'json' }).$type<Record<string, unknown>>(),
+  error: text('error'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+})
+
+export type BotJob = typeof botJobs.$inferSelect
+
+export const botJobEvents = sqliteTable('bot_job_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  jobId: integer('job_id').notNull().references(() => botJobs.id),
+  eventType: text('event_type').notNull(),
+  groupJid: text('group_jid'),
+  userJid: text('user_jid'),
+  messageId: text('message_id'),
+  data: text('data', { mode: 'json' }).$type<Record<string, unknown>>(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+})
+
+export type BotJobEvent = typeof botJobEvents.$inferSelect

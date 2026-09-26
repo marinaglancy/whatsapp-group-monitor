@@ -54,6 +54,7 @@ export function initAccountDb(phone: string) {
       permissions TEXT,
       bot_membership TEXT NOT NULL DEFAULT 'none',
       bot_functions INTEGER NOT NULL DEFAULT 0,
+      bot_config TEXT,
       is_archived INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
@@ -100,6 +101,44 @@ export function initAccountDb(phone: string) {
     CREATE INDEX IF NOT EXISTS idx_activity_group_ts ON group_activity_log(group_jid, timestamp);
     CREATE INDEX IF NOT EXISTS idx_activity_user_group ON group_activity_log(user_jid, group_jid);
     CREATE INDEX IF NOT EXISTS idx_activity_parent ON group_activity_log(parent_id);
+
+    CREATE TABLE IF NOT EXISTS bot_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_type TEXT NOT NULL,
+      group_jid TEXT,
+      user_jid TEXT,
+      message_id TEXT,
+      payload TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      run_at INTEGER NOT NULL,
+      expires_at INTEGER,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      ai_calls INTEGER NOT NULL DEFAULT 0,
+      ai_tokens_in INTEGER NOT NULL DEFAULT 0,
+      ai_tokens_out INTEGER NOT NULL DEFAULT 0,
+      result TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bot_jobs_status_run ON bot_jobs(status, run_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_jobs_type_group_msg
+      ON bot_jobs(job_type, group_jid, message_id) WHERE message_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS bot_job_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER NOT NULL REFERENCES bot_jobs(id),
+      event_type TEXT NOT NULL,
+      group_jid TEXT,
+      user_jid TEXT,
+      message_id TEXT,
+      data TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bot_job_events_job ON bot_job_events(job_id);
+    CREATE INDEX IF NOT EXISTS idx_bot_job_events_message ON bot_job_events(message_id);
   `)
 
   // Migrations: drop columns that are no longer needed
@@ -120,6 +159,10 @@ export function initAccountDb(phone: string) {
   const memberCols = (sqlite.pragma('table_info(group_members)') as { name: string }[]).map(c => c.name)
   if (!memberCols.includes('last_read_at')) {
     sqlite.exec('ALTER TABLE group_members ADD COLUMN last_read_at TEXT')
+  }
+
+  if (!groupCols.includes('bot_config')) {
+    sqlite.exec('ALTER TABLE groups ADD COLUMN bot_config TEXT')
   }
 
   currentPhone = phone
