@@ -19,8 +19,8 @@ export function seedGroup(jid: string, name: string, opts: Partial<{
   }).run()
 }
 
-export function seedUser(jid: string, displayName: string | null = null): void {
-  getAccountDb().insert(users).values({ jid, displayName }).onConflictDoNothing().run()
+export function seedUser(jid: string, displayName: string | null = null, phoneNumber: string | null = null): void {
+  getAccountDb().insert(users).values({ jid, displayName, phoneNumber }).onConflictDoNothing().run()
 }
 
 export function seedMember(groupJid: string, userJid: string, membership: typeof membershipLevels[number] = 'participant'): void {
@@ -36,6 +36,7 @@ export function seedMessage(groupJid: string, userJid: string, text: string, tim
   messageId: string
   parentId: string
   metadata: Record<string, unknown>
+  raw: Record<string, unknown>
 }> = {}): string {
   const messageId = opts.messageId ?? `MSG${++msgSeq}`
   getAccountDb().insert(groupActivityLog).values({
@@ -45,7 +46,7 @@ export function seedMessage(groupJid: string, userJid: string, text: string, tim
     parentId: opts.parentId ?? null,
     eventType: opts.eventType ?? 'message',
     metadata: opts.metadata ?? { contentType: 'conversation', text },
-    raw: null,
+    raw: opts.raw ?? null,
     timestamp,
   }).run()
   return messageId
