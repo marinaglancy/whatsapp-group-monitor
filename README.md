@@ -79,6 +79,41 @@ before it was connected (except what WhatsApp's history sync provided).
 For debugging, two commands answer without calling the AI: `@bot !tools` lists the
 data tools, and `@bot !tool <name> <json-args>` runs one and echoes its raw result.
 
+### How the AI integration works
+
+A question is answered by a **function-calling loop** against Google's Gemini API
+(`@google/genai`): the model receives the system prompt, the recent conversation of
+the group the question was asked in, and the question — then decides which data tools
+to call, reads their results, and writes the final answer (up to 6 tool rounds, 60 s
+budget per job). The tools are read-only queries over this monitor's own database:
+
+| Tool | Returns |
+|------|---------|
+| `group_list` | The groups in scope, with optional details (member count, bot role, last activity, …) |
+| `group_members` | Members of a group with roles, names, join dates and activity counts |
+| `group_messages` | Messages as participants see them — final edited text, polls with votes, events with responses, reactions, media indications |
+| `activity_stats` | Aggregated counts per group and period: messages, edits, reactions, votes, plus contributor/engager/participant member numbers |
+| `message_search` | Full-text search (messages, captions, poll questions/options, event names, attachment filenames) |
+
+The tools only ever see the groups linked to the Q&A group (enforced server-side —
+the model cannot widen its own scope), all dates use the configured timezone, and
+oversized results are paged. Message *content* the model reads it can quote; media
+files, voice messages and images are never sent — only an indication of their type.
+Every request, response, tool call and token count is logged to the job's event
+timeline in the web panel.
+
+### Placeholders
+
+These tokens are replaced before any text reaches the model. They work in the
+**main system prompt** (Settings) and in each group's **additional instructions**:
+
+| Placeholder | Replaced with |
+|-------------|---------------|
+| `{{timezone}}` | The effective timezone from Settings (IANA name; `UTC` when blank) |
+| `{{botlid}}` | The bot account's own id (lid digits) — the default prompt uses it so the model recognizes its earlier replies and mentions of itself |
+
+Unknown `{{tokens}}` are left as-is.
+
 ### Privacy note
 
 When the bot answers, message content from the linked groups is sent to Google's
