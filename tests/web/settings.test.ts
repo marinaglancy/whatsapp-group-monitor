@@ -62,12 +62,24 @@ describe('/api/settings AI keys', () => {
     expect(body.ai_daily_limit).toBe('100')
   })
 
+  it('exposes the effective system prompt and round-trips edits', async () => {
+    let body = (await get()).json()
+    expect(body.ai_system_prompt).toContain('WhatsApp') // shipped default
+    await post({ ai_system_prompt: 'You are a pirate.' })
+    body = (await get()).json()
+    expect(body.ai_system_prompt).toBe('You are a pirate.')
+    await post({ ai_system_prompt: '' }) // clearing restores the default
+    body = (await get()).json()
+    expect(body.ai_system_prompt).toContain('WhatsApp')
+  })
+
   it('settings page contains the AI assistant section', async () => {
     const res = await app.inject({ method: 'GET', url: '/settings', headers: { cookie: auth.cookie } })
     expect(res.statusCode).toBe(200)
     expect(res.body).toContain('id="gemini_api_key"')
     expect(res.body).toContain('id="gemini_model"')
     expect(res.body).toContain('id="ai_daily_limit"')
+    expect(res.body).toContain('id="ai_system_prompt"')
   })
 
   it('rejects a POST without CSRF', async () => {

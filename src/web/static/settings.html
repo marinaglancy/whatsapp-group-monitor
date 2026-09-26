@@ -31,6 +31,19 @@
       margin-bottom: 1rem;
     }
     input:focus { border-color: #25d366; }
+    textarea {
+      width: 100%;
+      padding: 0.6rem 0.8rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-family: inherit;
+      outline: none;
+      box-sizing: border-box;
+      margin-bottom: 1rem;
+      resize: vertical;
+    }
+    textarea:focus { border-color: #25d366; }
     .save-btn {
       padding: 0.6rem 1.5rem;
       background: #25d366;
@@ -72,6 +85,10 @@
         <label for="ai_daily_limit">Daily AI call limit (0 = unlimited)</label>
         <input type="number" id="ai_daily_limit" name="ai_daily_limit" min="0" />
 
+        <label for="ai_system_prompt">Main system prompt</label>
+        <textarea id="ai_system_prompt" name="ai_system_prompt" rows="9"></textarea>
+        <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">Sent to the AI before every answer, together with the current date, the linked-group list, and each Q&amp;A group's own additional instructions. Clearing this restores the default.</p>
+
         <button type="submit" class="save-btn">Save</button>
         <p class="msg" id="msg"></p>
       </form>
@@ -89,6 +106,7 @@
         document.getElementById('page_size').value = data.page_size || '50';
         document.getElementById('gemini_model').value = data.gemini_model || '';
         document.getElementById('ai_daily_limit').value = data.ai_daily_limit || '300';
+        document.getElementById('ai_system_prompt').value = data.ai_system_prompt || '';
         keySet = !!data.gemini_api_key_set;
         updateKeyHint();
       } catch (e) {
@@ -125,6 +143,7 @@
           page_size: document.getElementById('page_size').value,
           gemini_model: document.getElementById('gemini_model').value,
           ai_daily_limit: document.getElementById('ai_daily_limit').value,
+          ai_system_prompt: document.getElementById('ai_system_prompt').value,
         };
         const keyInput = document.getElementById('gemini_api_key').value;
         if (keyInput) payload.gemini_api_key = keyInput; // omit when blank so the stored key is kept

@@ -6,7 +6,7 @@ import { getCurrentQr, getConnectionState, getBotUser } from '../../whatsapp/han
 import { getSock } from '../../whatsapp/client.js'
 import { requireAuth, requireAuthApi, generateCsrf, verifyCsrf } from '../middleware/auth.js'
 import { getSetting, getSettingOrDefault, setSetting } from '../../db/queries/settings.js'
-import { DEFAULT_GEMINI_MODEL, DEFAULT_AI_DAILY_LIMIT } from '../../ai/settings.js'
+import { DEFAULT_GEMINI_MODEL, DEFAULT_AI_DAILY_LIMIT, getAiSettings } from '../../ai/settings.js'
 import { getAllGroups, getGroup, updateGroupQaConfig, QA_INSTRUCTIONS_MAX } from '../../db/queries/groups.js'
 import { GroupRecord } from '../../whatsapp/group/record.js'
 import { isAccountDbReady } from '../../db/account.js'
@@ -91,6 +91,7 @@ export function registerRoutes(app: FastifyInstance) {
       gemini_api_key_set: !!getSetting('gemini_api_key'),
       gemini_model: getSettingOrDefault('gemini_model', DEFAULT_GEMINI_MODEL),
       ai_daily_limit: getSettingOrDefault('ai_daily_limit', String(DEFAULT_AI_DAILY_LIMIT)),
+      ai_system_prompt: getAiSettings().systemPrompt,
     })
   })
 
@@ -99,7 +100,7 @@ export function registerRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: 'Invalid CSRF token' })
     }
     const body = req.body as Record<string, string>
-    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit']
+    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit', 'ai_system_prompt']
     for (const key of allowed) {
       if (key in body && typeof body[key] === 'string') {
         setSetting(key, body[key])
