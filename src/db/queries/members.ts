@@ -87,12 +87,14 @@ export function upsertMembership(groupJid: string, userJid: string, membership: 
     .from(groupMembers)
     .where(and(eq(groupMembers.groupJid, groupJid), eq(groupMembers.userJid, userJid)))
     .get()
+  const wasActive = isActiveMembership(prev?.membership)
+  const isActive = isActiveMembership(membership)
+  const becameActive = !wasActive && isActive
+  const becameInactive = wasActive && !isActive
   if (!opts.suppressEvents) {
-    const wasActive = isActiveMembership(prev?.membership)
-    const isActive = isActiveMembership(membership)
-    if (!wasActive && isActive) {
+    if (becameActive) {
       recordMembershipEvent(groupJid, userJid, 'member_joined', opts)
-    } else if (wasActive && !isActive) {
+    } else if (becameInactive) {
       recordMembershipEvent(groupJid, userJid, 'member_left', opts)
     }
   }
@@ -108,8 +110,10 @@ export function upsertMembership(groupJid: string, userJid: string, membership: 
     target: [groupMembers.groupJid, groupMembers.userJid],
     set: {
       membership,
-      ...(isLeaving ? { leftAt: now } : {}),
-      ...(isJoining ? { joinedAt: now, leftAt: null } : {}),
+      // joined_at/left_at record TRANSITIONS: a resync of an unchanged member
+      // must not move them (the model reads joined_at via group_members)
+      ...(becameInactive ? { leftAt: now } : {}),
+      ...(becameActive ? { joinedAt: now, leftAt: null } : {}),
       updatedAt: now,
     },
   }).run()

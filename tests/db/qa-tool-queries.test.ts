@@ -26,6 +26,11 @@ beforeEach(() => {
   seedMessage('a@g.us', BORIS, '', 2100, { eventType: 'edit', parentId: 'M2', metadata: { contentType: 'conversation', text: 'the picnic plan v2' } })
   seedMessage('a@g.us', ANNA, '', 2200, { eventType: 'reaction', parentId: 'M2', metadata: { emoji: '👍' } })
   seedMessage('a@g.us', CARL, 'look', 3000, { messageId: 'M3', metadata: { contentType: 'imageMessage', text: 'look' } })
+  // reaction lifecycle on M3: Boris reacts then removes; Anna reacts then changes
+  seedMessage('a@g.us', BORIS, '', 3100, { eventType: 'reaction', parentId: 'M3', metadata: { emoji: '👍' } })
+  seedMessage('a@g.us', BORIS, '', 3200, { eventType: 'reaction', parentId: 'M3', metadata: { emoji: null } })
+  seedMessage('a@g.us', ANNA, '', 3300, { eventType: 'reaction', parentId: 'M3', metadata: { emoji: '👍' } })
+  seedMessage('a@g.us', ANNA, '', 3400, { eventType: 'reaction', parentId: 'M3', metadata: { emoji: '❤️' } })
   seedMessage('a@g.us', BORIS, '', 4000, { messageId: 'M4', metadata: { contentType: 'documentMessage' }, raw: { message: { documentMessage: { fileName: 'report.pdf' } } } })
   seedMessage('a@g.us', ANNA, '', 5000, { messageId: 'M5', eventType: 'poll_create', metadata: { question: 'Training Tue?', options: ['Yes', 'No'] } })
   seedMessage('a@g.us', BORIS, '', 5100, { eventType: 'poll_vote', parentId: 'M5', metadata: { selectedOptions: ['Yes'] } })
@@ -56,8 +61,9 @@ describe('qGroupMembers', () => {
     const { members, total } = qGroupMembers({ groupJids: AB }, base)
     expect(total).toBe(3)
     const anna = members.find(m => m.lid === ANNA)!
-    // Anna: M1, reaction, M5 poll, M6 event, M7, M10 in Alpha + B1 in Beta = 7 (primary+secondary only)
-    expect(anna.activityCount).toBe(7)
+    // Anna: M1, reaction on M2, 👍+❤️ on M3, M5 poll, M6 event, M7, M10 in Alpha + B1 in Beta = 9
+    // (primary+secondary only; Boris's reaction REMOVAL row is not activity)
+    expect(anna.activityCount).toBe(9)
     expect(anna.lastActivity).toBe(9600)
     expect(anna.phone).toBe('351911111111')
     expect(anna.role).toBe('admin')
@@ -120,6 +126,8 @@ describe('qGroupMessages', () => {
     const m3 = messages.find(m => m.messageId === 'M3')!
     expect(m3.media).toBe('image')
     expect(m3.text).toBe('look')
+    // reactions resolve to each user's LAST state: Boris removed his, Anna changed hers
+    expect(m3.reactions).toEqual([{ emoji: '❤️', by: [ANNA] }])
   })
 
   it('includes deleted messages with deleted_by only when asked', () => {
@@ -133,7 +141,8 @@ describe('qGroupMessages', () => {
 
   it('filters by type, reactions and date range with paging', () => {
     expect(qGroupMessages({ groupJids: A }, { ...base, types: ['poll'] }).messages.map(m => m.messageId)).toEqual(['M5'])
-    expect(qGroupMessages({ groupJids: A }, { ...base, hasReactions: true }).messages.map(m => m.messageId)).toEqual(['M2'])
+    // has_reactions = received a real reaction at some point (removals may have cleared it since — documented approximation)
+    expect(qGroupMessages({ groupJids: A }, { ...base, hasReactions: true }).messages.map(m => m.messageId)).toEqual(['M2', 'M3'])
     expect(qGroupMessages({ groupJids: A }, { ...base, from: 2500, to: 4500 }).messages.map(m => m.messageId)).toEqual(['M3', 'M4'])
     const desc = qGroupMessages({ groupJids: A }, { ...base, order: 'desc', limit: 2, offset: 0 })
     expect(desc.messages.map(m => m.messageId)).toEqual(['M10', 'M9'])
@@ -146,10 +155,11 @@ describe('qGroupMessages', () => {
     // Carl: authored M3, voted in M5, mentioned via text token in M10 (lid digits 9876? no — carl@lid bare is 'carl'); use a digit-lid member below for mentions
     expect(ids(CARL)).toEqual(['M3', 'M5'])
     // Boris: authored M2/M4/M8/M9; replied to M1 (M2 is his reply, so M1 is involved);
-    // voted M5, responded M6, deleted M7 (admin delete) and M8
-    expect(ids(BORIS)).toEqual(['M1', 'M2', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9'])
-    // Anna: authored M1/M5/M6/M7/M10, reacted to M2, and M2 is a reply TO her message M1 (already counted via authorship of M1)
-    expect(ids(ANNA)).toEqual(['M1', 'M2', 'M5', 'M6', 'M7', 'M10'])
+    // reacted to M3 (later removed — still an interaction); voted M5, responded M6,
+    // deleted M7 (admin delete) and M8
+    expect(ids(BORIS)).toEqual(['M1', 'M2', 'M3', 'M4', 'M5', 'M6', 'M7', 'M8', 'M9'])
+    // Anna: authored M1/M5/M6/M7/M10, reacted to M2 and M3, and M2 is a reply TO her message M1
+    expect(ids(ANNA)).toEqual(['M1', 'M2', 'M3', 'M5', 'M6', 'M7', 'M10'])
   })
 
   it('matches mentions via text token with digit identities', () => {
@@ -173,7 +183,8 @@ describe('qActivityStats', () => {
     expect(r.counts.primary).toEqual({ messages: 8, polls: 1, events: 1 })
     // corrective: edits 1; own_deletes 1 (M8); admin delete of M7 not counted here
     expect(r.counts.corrective).toEqual({ edits: 1, own_deletes: 1 })
-    expect(r.counts.secondary).toEqual({ reactions: 1, poll_votes: 2, event_responses: 1 })
+    // reaction removals (null emoji) are not activity: 👍(M2) + 👍,👍,❤️(M3) = 4
+    expect(r.counts.secondary).toEqual({ reactions: 4, poll_votes: 2, event_responses: 1 })
     expect(r.members!.contributors).toBe(3)
     expect(r.members!.engagers).toBe(3) // Anna reacted, Boris voted+responded, Carl voted
     expect(r.members!.joined).toBe(1)

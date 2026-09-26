@@ -1,7 +1,7 @@
 import { formatDateTime, parseDateTime } from '../../utils/time.js'
 import type { QaScope } from '../../bot/scope.js'
 import {
-  qGroupMembers, qGroupMessages, qActivityStats, qSearchMessages, qUsersByJids,
+  qGroupMembers, qGroupMessages, qActivityStats, qSearchMessages, qUsersByJids, qFindUserJid,
   type QaMemberFilters, type QaStatsRange,
 } from '../../db/queries/qa-tools.js'
 import { getAllGroups } from '../../db/queries/groups.js'
@@ -78,6 +78,21 @@ function checkRange(from: number, to: number): void {
   if (from > to) throw new ToolError('from must be earlier than or equal to to')
 }
 
+/** Person references may arrive as full jids, bare lid digits (from person
+ *  strings) or phone numbers — resolve to the stored jid, or error clearly. */
+function resolvePersonRef(value: unknown, param: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new ToolError(`${param} must be a member reference string`)
+  const jid = qFindUserJid(value.trim())
+  if (!jid) throw new ToolError(`Unknown member '${value}' in ${param} — use a lid from group_members`)
+  return jid
+}
+
+function intArg(value: unknown, param: string): number {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  if (!Number.isFinite(n)) throw new ToolError(`${param} must be a number`)
+  return Math.floor(n)
+}
+
 type UserInfo = Map<string, { name: string | null; phone: string | null }>
 
 function person(lid: string, users: UserInfo): string {
@@ -113,7 +128,10 @@ const GROUP_LIST_FIELDS = ['description', 'is_community', 'parent_jid', 'member_
 const MEMBER_FIELDS = ['phone', 'role', 'last_activity', 'activity_count', 'joined_at', 'left_at', 'groups', 'last_read'] as const
 
 function fieldSet(v: unknown, allowed: readonly string[], omittedMeansAll: boolean): Set<string> {
-  if (v === undefined || v === null) return new Set(omittedMeansAll ? allowed : [])
+  // an empty array is treated like omission (models frequently send [])
+  if (v === undefined || v === null || (Array.isArray(v) && v.length === 0)) {
+    return new Set(omittedMeansAll ? allowed : [])
+  }
   if (!Array.isArray(v) || v.some(f => typeof f !== 'string')) throw new ToolError('fields must be an array of field names')
   for (const f of v as string[]) {
     if (!allowed.includes(f)) throw new ToolError(`Unknown field '${f}'. Available: ${allowed.join(', ')}`)
@@ -179,13 +197,15 @@ const executors: Record<string, Executor> = {
     const filters: QaMemberFilters = {}
     if (typeof args.name_contains === 'string' && args.name_contains) filters.nameContains = args.name_contains
     if (typeof args.phone_contains === 'string' && args.phone_contains) filters.phoneContains = args.phone_contains
-    if (Array.isArray(args.lids) && args.lids.length) filters.lids = (args.lids as unknown[]).map(String)
+    if (Array.isArray(args.lids) && args.lids.length) {
+      filters.lids = (args.lids as unknown[]).map(l => resolvePersonRef(l, 'lids'))
+    }
     if (args.role !== undefined) {
       if (args.role !== 'participant' && args.role !== 'admin' && args.role !== 'superadmin') throw new ToolError('role must be participant, admin or superadmin')
       filters.role = args.role
     }
-    if (args.min_activity_count !== undefined) filters.minActivityCount = Number(args.min_activity_count)
-    if (args.max_activity_count !== undefined) filters.maxActivityCount = Number(args.max_activity_count)
+    if (args.min_activity_count !== undefined) filters.minActivityCount = intArg(args.min_activity_count, 'min_activity_count')
+    if (args.max_activity_count !== undefined) filters.maxActivityCount = intArg(args.max_activity_count, 'max_activity_count')
     if (args.last_activity_before !== undefined) filters.lastActivityBefore = dt(ctx, args.last_activity_before, 'start', 0)
     if (args.last_activity_after !== undefined) filters.lastActivityAfter = dt(ctx, args.last_activity_after, 'start', 0)
     const orderBy = (args.order_by as string | undefined) ?? 'lid'
@@ -208,7 +228,7 @@ const executors: Record<string, Executor> = {
       ...(fields.has('last_activity') && m.lastActivity ? { last_activity: formatDateTime(m.lastActivity, ctx.timezone) } : {}),
       ...(fields.has('activity_count') ? { activity_count: m.activityCount } : {}),
       ...(fields.has('joined_at') && m.joinedAt ? { joined_at: formatDateTime(m.joinedAt, ctx.timezone) } : {}),
-      ...(fields.has('left_at') && m.leftAt ? { left_at: formatDateTime(m.leftAt, ctx.timezone) } : {}),
+      ...(fields.has('left_at') && m.leftAt && m.role === 'none' ? { left_at: formatDateTime(m.leftAt, ctx.timezone) } : {}),
       ...(fields.has('last_read') && m.lastRead ? { last_read: m.lastRead } : {}),
       ...(fields.has('groups') && m.groups ? { groups: m.groups } : {}),
     }))
@@ -231,8 +251,7 @@ const executors: Record<string, Executor> = {
     let memberLid: string | undefined
     let memberPhone: string | null = null
     if (args.member_lid !== undefined) {
-      if (typeof args.member_lid !== 'string' || !args.member_lid) throw new ToolError('member_lid must be a jid string')
-      memberLid = args.member_lid
+      memberLid = resolvePersonRef(args.member_lid, 'member_lid')
       memberPhone = qUsersByJids([memberLid]).get(memberLid)?.phone ?? null
     }
     const order = args.order === 'desc' ? 'desc' : 'asc'
@@ -289,10 +308,12 @@ const executors: Record<string, Executor> = {
     }
     let participantLids: string[] | undefined
     if (args.participant_lids !== undefined) {
-      if (!Array.isArray(args.participant_lids) || (args.participant_lids as unknown[]).some(l => typeof l !== 'string')) {
-        throw new ToolError('participant_lids must be an array of lid strings')
+      if (!Array.isArray(args.participant_lids)) {
+        throw new ToolError('participant_lids must be an array of member references')
       }
-      participantLids = (args.participant_lids as string[]).length ? args.participant_lids as string[] : undefined
+      participantLids = (args.participant_lids as unknown[]).length
+        ? (args.participant_lids as unknown[]).map(l => resolvePersonRef(l, 'participant_lids'))
+        : undefined
     }
     const CATS = ['primary', 'corrective', 'secondary'] as const
     let categories: Set<'primary' | 'corrective' | 'secondary'>
@@ -339,8 +360,7 @@ const executors: Record<string, Executor> = {
     const jids = resolveJids(args.group_jids, ctx.scope)
     let authorLid: string | undefined
     if (args.author_lid !== undefined) {
-      if (typeof args.author_lid !== 'string' || !args.author_lid) throw new ToolError('author_lid must be a jid string')
-      authorLid = args.author_lid
+      authorLid = resolvePersonRef(args.author_lid, 'author_lid')
     }
     const from = dt(ctx, args.from, 'start', 0)
     const to = dt(ctx, args.to, 'end', Math.floor(now / 1000))

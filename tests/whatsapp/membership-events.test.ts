@@ -41,6 +41,15 @@ describe('membership events', () => {
     expect(membershipEvents().map(e => e.eventType)).toEqual(['member_joined', 'member_left', 'member_joined'])
   })
 
+  it('keeps joined_at stable across resyncs of an unchanged member', async () => {
+    const { getGroupMembers } = await import('../../src/db/queries/members.js')
+    syncGroupParticipants('g1@g.us', [{ id: 'u1@lid' }] as never) // baseline
+    const first = getGroupMembers('g1@g.us')[0].joinedAt
+    await new Promise(r => setTimeout(r, 5))
+    syncGroupParticipants('g1@g.us', [{ id: 'u1@lid' }] as never) // resync, no change
+    expect(getGroupMembers('g1@g.us')[0].joinedAt).toEqual(first)
+  })
+
   it('suppresses events on the baseline sync of a group with no known members', () => {
     syncGroupParticipants('g1@g.us', [
       { id: 'u1@lid' }, { id: 'u2@lid', admin: 'admin' },

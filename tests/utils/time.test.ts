@@ -45,6 +45,7 @@ describe('parseDateTime', () => {
   it('throws on malformed input and unknown timezones', () => {
     expect(() => parseDateTime('September 2026', 'UTC')).toThrow(TypeError)
     expect(() => parseDateTime('2026-13-01 00:00:00', 'UTC')).toThrow(TypeError)
+    expect(() => parseDateTime('2026-02-31 10:00:00', 'UTC')).toThrow(TypeError) // impossible date must not roll over
     expect(() => parseDateTime('2026-09-01 25:00:00', 'UTC')).toThrow(TypeError)
     expect(() => parseDateTime('2026-09-01 12:00:00', 'Mars/Olympus')).toThrow(TypeError)
     expect(() => parseDateTime('1758900000', 'UTC')).toThrow(TypeError) // epoch numbers are never accepted

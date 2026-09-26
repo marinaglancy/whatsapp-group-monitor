@@ -51,6 +51,11 @@ export function parseDateTime(s: string, timeZone: string, edge: 'start' | 'end'
   if (!zoneOk) throw new TypeError(`Unknown timezone '${timeZone}'`)
 
   const target = Date.UTC(Number(y), Number(mo) - 1, Number(d), H, MI, SE)
+  // reject impossible calendar dates (2026-02-31 would silently roll into March)
+  const check = new Date(target)
+  if (check.getUTCMonth() !== Number(mo) - 1 || check.getUTCDate() !== Number(d)) {
+    throw new TypeError(`Invalid date '${s}': that day does not exist`)
+  }
   let guess = target
   for (let i = 0; i < 2; i++) {
     guess = guess - (wallClockUtcMs(guess, timeZone) - target)

@@ -117,6 +117,7 @@ export function qGroupMembers(ctx: QaToolQueryCtx, opts: {
       WHERE group_jid IN (${inList(jids)})
         AND timestamp BETWEEN ${opts.activityFrom} AND ${opts.activityTo}
         AND event_type IN (${inList([...PRIMARY, ...SECONDARY])})
+        AND NOT (event_type = 'reaction' AND json_extract(metadata, '$.emoji') IS NULL)
       GROUP BY user_jid
     ) a ON a.user_jid = m.user_jid
     ${where}`
@@ -221,8 +222,11 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
       WHERE d.group_jid = base.group_jid AND d.parent_id = base.message_id AND d.event_type = 'delete')`)
   }
   if (opts.hasReactions) {
+    // approximation: received a real reaction at some point (later removals may
+    // have cleared it — resolving live state per row in SQL is not worth it)
     conditions.push(sql`EXISTS (SELECT 1 FROM group_activity_log rc
-      WHERE rc.group_jid = base.group_jid AND rc.parent_id = base.message_id AND rc.event_type = 'reaction')`)
+      WHERE rc.group_jid = base.group_jid AND rc.parent_id = base.message_id
+        AND rc.event_type = 'reaction' AND json_extract(rc.metadata, '$.emoji') IS NOT NULL)`)
   }
   if (opts.memberLid) {
     const lid = opts.memberLid
@@ -279,7 +283,8 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
 
     let text = (meta.text as string | undefined) ?? null
     let edited = false
-    const reactionsByEmoji = new Map<string, string[]>()
+    // per-user LAST reaction (children are id-ordered): null/empty = removed
+    const reactionByUser = new Map<string, string | null>()
     const votesByUser = new Map<string, string[]>()
     const responseByUser = new Map<string, string>()
     let deleted = false
@@ -293,15 +298,9 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
           if (t) { text = t; edited = true }
           break
         }
-        case 'reaction': {
-          const emoji = cmeta.emoji as string | null
-          if (emoji) {
-            if (!reactionsByEmoji.has(emoji)) reactionsByEmoji.set(emoji, [])
-            const list = reactionsByEmoji.get(emoji)!
-            if (!list.includes(c.user_jid as string)) list.push(c.user_jid as string)
-          }
+        case 'reaction':
+          reactionByUser.set(c.user_jid as string, (cmeta.emoji as string | null) || null)
           break
-        }
         case 'poll_vote':
           votesByUser.set(c.user_jid as string, (cmeta.selectedOptions as string[] | undefined) ?? [])
           break
@@ -312,6 +311,13 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
           if (!deleted) { deleted = true; deletedBy = c.user_jid as string }
           break
       }
+    }
+
+    const reactionsByEmoji = new Map<string, string[]>()
+    for (const [user, emoji] of reactionByUser) {
+      if (!emoji) continue // removed their reaction
+      if (!reactionsByEmoji.has(emoji)) reactionsByEmoji.set(emoji, [])
+      reactionsByEmoji.get(emoji)!.push(user)
     }
 
     let poll: QaMessageRow['poll'] = null
@@ -413,11 +419,13 @@ export function qActivityStats(ctx: QaToolQueryCtx, opts: {
       SELECT 1 FROM group_activity_log p
       WHERE p.group_jid = base.group_jid AND p.message_id = base.parent_id AND p.user_jid = base.user_jid
     ) THEN 1 ELSE 0 END) AS own_deletes,
-    sum(CASE WHEN base.event_type = 'reaction' THEN 1 ELSE 0 END) AS reactions,
+    sum(CASE WHEN base.event_type = 'reaction' AND json_extract(base.metadata, '$.emoji') IS NOT NULL THEN 1 ELSE 0 END) AS reactions,
     sum(CASE WHEN base.event_type = 'poll_vote' THEN 1 ELSE 0 END) AS poll_votes,
     sum(CASE WHEN base.event_type = 'event_response' THEN 1 ELSE 0 END) AS event_responses,
     count(DISTINCT CASE WHEN base.event_type IN (${inList(PRIMARY)}) THEN base.user_jid END) AS contributors,
-    count(DISTINCT CASE WHEN base.event_type IN (${inList(SECONDARY)}) THEN base.user_jid END) AS engagers,
+    count(DISTINCT CASE WHEN base.event_type IN ('poll_vote', 'event_response')
+      OR (base.event_type = 'reaction' AND json_extract(base.metadata, '$.emoji') IS NOT NULL)
+      THEN base.user_jid END) AS engagers,
     sum(CASE WHEN base.event_type = 'member_joined' THEN 1 ELSE 0 END) AS joined_cnt,
     sum(CASE WHEN base.event_type = 'member_left' THEN 1 ELSE 0 END) AS left_cnt`
 
@@ -493,6 +501,19 @@ export function qActivityStats(ctx: QaToolQueryCtx, opts: {
 
 // --- shared lookups ----------------------------------------------------------
 
+/** Resolve a person reference the model may give in any of the forms it has
+ *  seen — a full jid, bare lid digits, or a phone number — to the stored jid. */
+export function qFindUserJid(ref: string): string | null {
+  if (ref.includes('@')) return ref
+  const db = getAccountDb()
+  const row = db.get<{ jid: string }>(sql`
+    SELECT jid FROM users
+    WHERE jid = ${ref + '@lid'} OR jid = ${ref + '@s.whatsapp.net'} OR phone_number = ${ref}
+    ORDER BY CASE WHEN jid LIKE '%@lid' THEN 0 ELSE 1 END
+    LIMIT 1`)
+  return row?.jid ?? null
+}
+
 /** Batch name/phone lookup for building person strings in the executor layer. */
 export function qUsersByJids(jids: string[]): Map<string, { name: string | null; phone: string | null }> {
   if (!jids.length) return new Map()
@@ -555,7 +576,9 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
      AND t.event_type IN ('message', 'poll_create', 'event_create')
     WHERE messages_fts MATCH ${match}
       AND t.group_jid IN (${inList(jids)})
-      AND t.timestamp BETWEEN ${opts.from} AND ${opts.to}${authorCond}`
+      AND t.timestamp BETWEEN ${opts.from} AND ${opts.to}${authorCond}
+      AND NOT EXISTS (SELECT 1 FROM group_activity_log del
+        WHERE del.group_jid = t.group_jid AND del.parent_id = t.message_id AND del.event_type = 'delete')`
 
   const total = db.get<{ cnt: number }>(sql`SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
   const rows = db.all<Record<string, unknown>>(sql`

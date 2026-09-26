@@ -105,6 +105,31 @@ describe('group_members', () => {
     const out = run('group_members', { activity_from: '2026-09-16', activity_to: '2026-09-15' }, ctx)
     expect(out.error).toMatch(/from.*to/i)
   })
+
+  it('rejects non-numeric count filters instead of returning silent zeros', () => {
+    const out = run('group_members', { min_activity_count: 'abc' }, ctx)
+    expect(out.error).toMatch(/min_activity_count/i)
+  })
+
+  it('treats an empty fields array like an omitted one', () => {
+    const out = run('group_members', { fields: [], activity_from: '2026-09-15', activity_to: '2026-09-16' }, ctx)
+    expect(out.members[0].activity_count).toBeDefined()
+  })
+
+  it('accepts bare-digit person references from person strings (lid or phone)', () => {
+    // person strings emit '<lid digits> <phone> <name>' — those digits must be usable as filters
+    const byBare = run('group_messages', { from: '2026-09-15', to: '2026-09-15', member_lid: 'anna' }, ctx)
+    expect(byBare.total).toBe(2) // authored M1, reacted to M2
+    const byPhone = run('group_messages', { from: '2026-09-15', to: '2026-09-15', member_lid: '351911111111' }, ctx)
+    expect(byPhone.total).toBe(2)
+    const unknown = run('group_messages', { from: '2026-09-15', to: '2026-09-15', member_lid: 'nosuch' }, ctx)
+    expect(unknown.error).toMatch(/unknown member/i)
+  })
+
+  it('accepts bare-digit participant_lids in stats', () => {
+    const out = run('activity_stats', { ranges: [{ from: '2026-09-15', to: '2026-09-15' }], participant_lids: ['anna'] }, ctx)
+    expect(out.rows[0].counts.primary.messages).toBe(1)
+  })
 })
 
 describe('group_messages', () => {

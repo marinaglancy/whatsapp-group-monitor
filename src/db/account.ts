@@ -174,12 +174,21 @@ export function initAccountDb(phone: string) {
   // maintained by an insert trigger (activity rows are insert-only).
   const hasFts = !!sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'").get()
   if (!hasFts) {
-    sqlite.exec(`
-      CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='', tokenize='porter unicode61');
-      INSERT INTO messages_fts(rowid, text)
-        SELECT id, json_extract(metadata, '$.text') FROM group_activity_log
-        WHERE event_type IN ('message', 'edit') AND json_extract(metadata, '$.text') IS NOT NULL;
-    `)
+    // atomic: a crash between CREATE and backfill would otherwise leave an
+    // empty index that the hasFts guard treats as complete forever
+    sqlite.exec('BEGIN')
+    try {
+      sqlite.exec(`
+        CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='', tokenize='porter unicode61');
+        INSERT INTO messages_fts(rowid, text)
+          SELECT id, json_extract(metadata, '$.text') FROM group_activity_log
+          WHERE event_type IN ('message', 'edit') AND json_extract(metadata, '$.text') IS NOT NULL;
+      `)
+      sqlite.exec('COMMIT')
+    } catch (err) {
+      sqlite.exec('ROLLBACK')
+      throw err
+    }
   }
   sqlite.exec(`
     CREATE TRIGGER IF NOT EXISTS trg_fts_activity AFTER INSERT ON group_activity_log
