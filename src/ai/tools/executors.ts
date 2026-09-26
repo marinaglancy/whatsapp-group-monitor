@@ -3,7 +3,7 @@ import type { QaScope } from '../../bot/scope.js'
 import {
   qGroupMembers, qGroupMessages, qActivityStats, qSearchMessages, qUsersByJids, qFindUserJid,
   type QaMemberFilters, type QaStatsRange,
-} from '../../db/queries/qa-tools.js'
+} from '../../db/queries/group-tools.js'
 import { getAllGroups } from '../../db/queries/groups.js'
 import { logger } from '../../utils/logger.js'
 

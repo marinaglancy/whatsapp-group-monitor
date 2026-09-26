@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedUser, seedMember, seedMessage } from '../helpers/fixtures.js'
-import { qGroupMembers, qGroupMessages, qActivityStats, qSearchMessages } from '../../src/db/queries/qa-tools.js'
+import { qGroupMembers, qGroupMessages, qActivityStats, qSearchMessages } from '../../src/db/queries/group-tools.js'
 
 const ANNA = 'anna@lid'
 const BORIS = 'boris@lid'
