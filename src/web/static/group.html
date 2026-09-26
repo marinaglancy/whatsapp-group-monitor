@@ -231,7 +231,7 @@
         const res = await fetch('/api/groups');
         const all = (await res.json()).groups || [];
         const linked = new Set(group.qaLinkedJids || []);
-        const visible = all.filter(g => g.jid !== group.jid || linked.has(g.jid));
+        const visible = all; // the current group stays visible: it is always in scope
         const sortName = (a, b) => a.name.localeCompare(b.name);
         const childMap = {};
         for (const g of visible) {
@@ -241,12 +241,15 @@
         }
         for (const jid in childMap) childMap[jid].sort(sortName);
         const topLevel = visible.filter(g => !g.parentCommunityJid).sort(sortName);
+        // the current group is always in scope: shown ticked and locked, never saved
         const row = (g, parentJid) =>
           '<label style="display:block;padding:0.15rem 0' + (parentJid ? ';margin-left:1.5rem' : '') + '">'
           + '<input type="checkbox" class="qa-link" value="' + escHtml(g.jid) + '"'
           + (parentJid ? ' data-parent="' + escHtml(parentJid) + '"' : '')
-          + (linked.has(g.jid) ? ' checked' : '') + ' /> ' + escHtml(g.name)
+          + (g.jid === group.jid ? ' data-self="1" checked disabled' : (linked.has(g.jid) ? ' checked' : ''))
+          + ' /> ' + escHtml(g.name)
           + (g.isCommunity ? ' <span class="badge" style="background:#e8f5e9;color:#2e7d32">community</span>' : '')
+          + (g.jid === group.jid ? ' <span class="inactive">(this group — always included)</span>' : '')
           + '</label>';
         let html = '';
         for (const g of topLevel) {
@@ -269,6 +272,7 @@
 
     function syncCommunityChildren(cb) {
       document.querySelectorAll('input.qa-link[data-parent="' + CSS.escape(cb.value) + '"]').forEach(child => {
+        if (child.dataset.self) return; // the current group stays ticked and locked
         if (cb.checked) {
           if (!child.disabled) child.dataset.own = child.checked ? '1' : '';
           child.checked = true;

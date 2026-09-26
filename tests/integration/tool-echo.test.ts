@@ -35,7 +35,7 @@ function enqueue(text: string) {
   })!
 }
 
-describe('tool-echo mode (temporary, phase 3)', () => {
+describe('tool-echo mode (debug commands, no AI cost)', () => {
   it('lists tools on !tools', async () => {
     enqueue('!tools')
     await runWorkerPass()
@@ -61,9 +61,11 @@ describe('tool-echo mode (temporary, phase 3)', () => {
     expect(sent[1].text.toLowerCase()).toContain('json')
   })
 
-  it('still acknowledges normal questions with the stub reply', async () => {
+  it('routes normal questions to the AI responder', async () => {
+    // no API key configured: the responder path answers with its static notice,
+    // proving non-command questions no longer hit the echo branch
     enqueue('how active was Alpha?')
     await runWorkerPass()
-    expect(sent[0].text).toContain('I heard')
+    expect(sent[0].text).toMatch(/not configured/i)
   })
 })

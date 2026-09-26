@@ -5,7 +5,7 @@ import { updateBotUser } from '../../src/whatsapp/handlers/connection.js'
 import { updateGroupQaConfig } from '../../src/db/queries/groups.js'
 import { maybeEnqueueQaJob, QA_FRESHNESS_MS } from '../../src/bot/trigger.js'
 import { registerSentMessage } from '../../src/bot/sent-registry.js'
-import { getJob } from '../../src/db/queries/jobs.js'
+import { getJob, insertJob, addJobEvent } from '../../src/db/queries/jobs.js'
 
 const BOT_JID = '15550001234@s.whatsapp.net'
 const BOT_LID = '98765432101234@lid'
@@ -63,6 +63,17 @@ describe('maybeEnqueueQaJob', () => {
     const id = maybeEnqueueQaJob(record({ parentId: 'BOTMSG', metadata: { text: 'and for August?' } }), NOW_MS)
     expect(id).not.toBeNull()
     expect(getJob(id!)!.payload).toEqual({ text: 'and for August?', quotedBotMessageId: 'BOTMSG' })
+  })
+
+  it('links a follow-up to the job that produced the quoted answer', () => {
+    seedMessage('qa@g.us', BOT_LID, 'earlier answer', NOW_S - 60, { messageId: 'BOTMSG' })
+    const parentId = insertJob({
+      jobType: 'qa_answer', groupJid: 'qa@g.us', userJid: 'asker@s.whatsapp.net', messageId: 'Q0',
+      payload: { text: 'q0' }, runAt: NOW_S - 70, expiresAt: NOW_S + 600,
+    })!
+    addJobEvent(parentId, 'reply_sent', { groupJid: 'qa@g.us', messageId: 'BOTMSG' })
+    const id = maybeEnqueueQaJob(record({ parentId: 'BOTMSG', metadata: { text: 'and more?' } }), NOW_MS)
+    expect(getJob(id!)!.payload).toEqual({ text: 'and more?', quotedBotMessageId: 'BOTMSG', parentJobId: parentId })
   })
 
   it('ignores replies to non-bot messages', () => {

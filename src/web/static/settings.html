@@ -92,7 +92,7 @@
 
         <label for="ai_system_prompt">Main system prompt</label>
         <textarea id="ai_system_prompt" name="ai_system_prompt" rows="9"></textarea>
-        <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">Sent to the AI before every answer, together with the current date, the linked-group list, and each Q&amp;A group's own additional instructions. Clearing this restores the default.</p>
+        <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">Sent to the AI before every answer, together with the current date, the linked-group list, and each Q&amp;A group's own additional instructions. Placeholders: <code>{{timezone}}</code> (the timezone above), <code>{{botlid}}</code> (the bot account's id). Clearing this restores the default.</p>
 
         <button type="submit" class="save-btn">Save</button>
         <p class="msg" id="msg"></p>

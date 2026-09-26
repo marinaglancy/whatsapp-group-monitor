@@ -1,6 +1,6 @@
 import { getGroup } from '../db/queries/groups.js'
 import { getCreationRecord } from '../db/queries/activity.js'
-import { insertJob } from '../db/queries/jobs.js'
+import { insertJob, findJobIdByReplyMessage } from '../db/queries/jobs.js'
 import { getBotJids } from '../whatsapp/handlers/connection.js'
 import { wasSentByBot } from './sent-registry.js'
 import { signalWorker } from './worker.js'
@@ -34,12 +34,20 @@ export function maybeEnqueueQaJob(record: ProcessableRecord, nowMs: number = Dat
 
   if (nowMs - record.timestamp * 1000 > QA_FRESHNESS_MS) return null
 
+  // A reply to one of our answers continues that exchange: link the producing
+  // job so the responder can replay the thread (payload.parentJobId).
+  const parentJobId = quotedBotMessageId ? findJobIdByReplyMessage(quotedBotMessageId) : null
+
   const id = insertJob({
     jobType: 'qa_answer',
     groupJid: record.groupJid,
     userJid: record.userJid,
     messageId: record.messageId,
-    payload: { text, ...(quotedBotMessageId ? { quotedBotMessageId } : {}) },
+    payload: {
+      text,
+      ...(quotedBotMessageId ? { quotedBotMessageId } : {}),
+      ...(parentJobId !== null ? { parentJobId } : {}),
+    },
     runAt: Math.floor(nowMs / 1000),
     expiresAt: Math.floor(record.timestamp + QA_FRESHNESS_MS / 1000),
   })

@@ -156,6 +156,17 @@ export function hasJobEvent(jobId: number, eventType: string): boolean {
     .limit(1).get()
 }
 
+/** The job whose reply_sent event produced this message — links a follow-up
+ *  reply back to its parent exchange (payload.parentJobId). */
+export function findJobIdByReplyMessage(messageId: string): number | null {
+  const db = getAccountDb()
+  const row = db.select({ jobId: botJobEvents.jobId }).from(botJobEvents)
+    .where(and(eq(botJobEvents.eventType, 'reply_sent'), eq(botJobEvents.messageId, messageId)))
+    .orderBy(desc(botJobEvents.id))
+    .limit(1).get()
+  return row?.jobId ?? null
+}
+
 /** Distinct groups that have at least one job — the jobs page filter source. */
 export function listJobGroups(): string[] {
   const db = getAccountDb()
