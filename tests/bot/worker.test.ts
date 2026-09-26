@@ -88,6 +88,37 @@ describe('worker', () => {
     expect(getJob(id)!.status).toBe('pending')
   })
 
+  it('re-runs orphan recovery after the account db was closed and reopened', async () => {
+    const { closeAccountDb, initAccountDb } = await import('../../src/db/account.js')
+    const { TEST_PHONE } = await import('../helpers/db.js')
+    registerJobHandler('qa_answer', async () => ({ ok: true }))
+    await runWorkerPass() // arms recoveredForPhone for this phone
+    closeAccountDb()
+    await runWorkerPass() // must notice the DB is gone and re-arm recovery
+    initAccountDb(TEST_PHONE)
+    const id = insertJob({ jobType: 'qa_answer', messageId: 'M1', runAt: NOW() })!
+    markJobProcessing(id) // orphaned by the simulated disconnect
+    await runWorkerPass()
+    expect(getJob(id)!.status).toBe('done')
+  })
+
+  it('fails a hung handler via the watchdog and keeps working', async () => {
+    vi.useFakeTimers()
+    try {
+      registerJobHandler('qa_answer', () => new Promise(() => { /* never settles */ }))
+      const id = insertJob({ jobType: 'qa_answer', messageId: 'M1', runAt: NOW() })!
+      const pass = runWorkerPass()
+      await vi.advanceTimersByTimeAsync(120_000) // attempt 1 times out → retry
+      await vi.advanceTimersByTimeAsync(120_000) // attempt 2 times out → failed
+      await pass
+      expect(getJob(id)!.status).toBe('failed')
+      expect(getJob(id)!.error).toMatch(/timed out/i)
+      expect(getJob(id)!.attempts).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('startWorker ticks on the interval', async () => {
     vi.useFakeTimers()
     try {

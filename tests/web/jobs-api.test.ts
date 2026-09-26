@@ -34,6 +34,7 @@ describe('/api/jobs', () => {
     expect(body.jobs[0].id).toBe(j2)
     expect(body.jobs[1].tokensTotal).toBe(130)
     expect(body.jobs[1].groupName).toBe('Admins')
+    expect(body.jobs[1].userName).toBe('Anna') // spec §7: display name in the list
   })
 
   it('filters by status/type/group and ignores unknown filter values', async () => {

@@ -64,7 +64,7 @@ export function markJobProcessing(id: number): void {
 
 export function completeJob(id: number, result?: Record<string, unknown>): void {
   const db = getAccountDb()
-  db.update(botJobs).set({ status: 'done', result: result ?? null, updatedAt: new Date() })
+  db.update(botJobs).set({ status: 'done', result: result ?? null, error: null, updatedAt: new Date() })
     .where(eq(botJobs.id, id)).run()
 }
 
@@ -86,9 +86,10 @@ export function markJobExpired(id: number): void {
     .where(eq(botJobs.id, id)).run()
 }
 
-/** Crash/redeploy recovery: orphaned 'processing' jobs go back to 'pending',
- *  unless already past expiresAt — those become 'expired'. */
-export function requeueOrphanedJobs(nowSec: number): number {
+/** Crash/redeploy recovery: orphaned 'processing' jobs go back to 'pending' —
+ *  unless past expiresAt (→ 'expired') or already at max attempts (→ 'failed',
+ *  so a job that crashes the process cannot crash-loop it on every restart). */
+export function requeueOrphanedJobs(nowSec: number, maxAttempts = 2): number {
   const db = getAccountDb()
   const expired = db.update(botJobs)
     .set({ status: 'expired', updatedAt: new Date() })
@@ -96,10 +97,13 @@ export function requeueOrphanedJobs(nowSec: number): number {
       eq(botJobs.status, 'processing'),
       sql`${botJobs.expiresAt} IS NOT NULL AND ${botJobs.expiresAt} < ${nowSec}`,
     )).run()
+  const exhausted = db.update(botJobs)
+    .set({ status: 'failed', error: `Exceeded max attempts (${maxAttempts}) after restart recovery`, updatedAt: new Date() })
+    .where(and(eq(botJobs.status, 'processing'), gte(botJobs.attempts, maxAttempts))).run()
   const requeued = db.update(botJobs)
     .set({ status: 'pending', updatedAt: new Date() })
     .where(eq(botJobs.status, 'processing')).run()
-  return expired.changes + requeued.changes
+  return expired.changes + exhausted.changes + requeued.changes
 }
 
 export function addJobAiUsage(id: number, usage: { calls: number; tokensIn: number; tokensOut: number }): void {

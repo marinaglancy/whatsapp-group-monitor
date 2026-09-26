@@ -132,7 +132,8 @@ export function registerRoutes(app: FastifyInstance) {
     if (getConnectionState() !== 'open' || !isAccountDbReady()) {
       return reply.status(503).send({ error: 'Not connected' })
     }
-    await syncGroups(getSock())
+    const ok = await syncGroups(getSock())
+    if (!ok) return reply.status(502).send({ error: 'Sync failed — see server logs' })
     return reply.send({ ok: true })
   })
 
@@ -300,10 +301,17 @@ export function registerRoutes(app: FastifyInstance) {
       offset: (page - 1) * perPage,
     })
     const nameByJid = new Map(getAllGroups().map(g => [g.jid, g.name]))
+    const userNameByJid = new Map<string, string | null>()
+    for (const j of jobs) {
+      if (j.userJid && !userNameByJid.has(j.userJid)) {
+        userNameByJid.set(j.userJid, getUser(j.userJid)?.displayName ?? null)
+      }
+    }
     return reply.send({
       jobs: jobs.map(j => ({
         ...j,
         groupName: j.groupJid ? nameByJid.get(j.groupJid) ?? null : null,
+        userName: j.userJid ? userNameByJid.get(j.userJid) ?? null : null,
         tokensTotal: j.aiTokensIn + j.aiTokensOut,
       })),
       total,

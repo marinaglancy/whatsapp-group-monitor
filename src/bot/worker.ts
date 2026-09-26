@@ -8,6 +8,8 @@ import { logger } from '../utils/logger.js'
 
 export const WORKER_TICK_MS = 20_000
 export const MAX_JOB_ATTEMPTS = 2
+/** Hard cap per handler invocation, so a hung socket call cannot wedge the worker. */
+export const WORKER_JOB_TIMEOUT_MS = 120_000
 
 export type JobHandler = (job: BotJob) => Promise<Record<string, unknown> | undefined>
 export interface JobHandlerOptions {
@@ -50,12 +52,17 @@ export function signalWorker(): void {
 
 export async function runWorkerPass(): Promise<void> {
   if (running) return
-  if (!isAccountDbReady()) return
+  if (!isAccountDbReady()) {
+    // the DB closed (disconnect); re-arm recovery for when it reopens, since
+    // jobs may have been orphaned mid-processing
+    recoveredForPhone = null
+    return
+  }
   running = true
   try {
     const phone = getAccountPhone()
     if (phone && phone !== recoveredForPhone) {
-      const changed = requeueOrphanedJobs(nowSec())
+      const changed = requeueOrphanedJobs(nowSec(), MAX_JOB_ATTEMPTS)
       recoveredForPhone = phone
       if (changed > 0) logger.info({ changed }, 'Recovered orphaned bot jobs')
     }
@@ -85,8 +92,18 @@ async function runJob(job: BotJob): Promise<void> {
   markJobProcessing(job.id)
   const fresh = getJob(job.id)
   if (!fresh) return
+  let watchdog: NodeJS.Timeout | undefined
   try {
-    const result = await entry.handler(fresh)
+    const result = await Promise.race([
+      entry.handler(fresh),
+      new Promise<never>((_, reject) => {
+        watchdog = setTimeout(
+          () => reject(new Error(`Job handler timed out after ${WORKER_JOB_TIMEOUT_MS / 1000}s`)),
+          WORKER_JOB_TIMEOUT_MS,
+        )
+        watchdog.unref()
+      }),
+    ])
     completeJob(job.id, result)
     logger.info({ jobId: job.id, jobType: job.jobType }, 'Bot job done')
   } catch (err) {
@@ -105,6 +122,8 @@ async function runJob(job: BotJob): Promise<void> {
         }
       }
     }
+  } finally {
+    if (watchdog) clearTimeout(watchdog)
   }
 }
 

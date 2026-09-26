@@ -3,9 +3,10 @@ import { logger } from '../../utils/logger.js'
 import { upsertGroupFromMetadata, markAbsentGroupsAsNone } from '../../db/queries/groups.js'
 import { syncGroupParticipants } from '../../db/queries/members.js'
 
-export async function syncGroups(sock: WASocket) {
+/** Full sync of groups and participants. Returns false when the sync failed. */
+export async function syncGroups(sock: WASocket): Promise<boolean> {
   const botJid = sock.user?.id
-  if (!botJid) return
+  if (!botJid) return false
 
   const botLid = sock.user?.lid
 
@@ -23,7 +24,9 @@ export async function syncGroups(sock: WASocket) {
 
     markAbsentGroupsAsNone(activeJids)
     logger.info({ count: groupList.length }, 'Group sync complete')
+    return true
   } catch (err) {
     logger.error({ err }, 'Failed to sync groups')
+    return false
   }
 }

@@ -63,6 +63,26 @@ describe('job store', () => {
     expect(getJob(b)!.error).toBe('it broke')
   })
 
+  it('clears a stale error when a retried job completes', () => {
+    const id = makeJob()!
+    markJobProcessing(id)
+    requeueJob(id, 'first attempt boom')
+    markJobProcessing(id)
+    completeJob(id, { ok: true })
+    expect(getJob(id)!.status).toBe('done')
+    expect(getJob(id)!.error).toBeNull()
+  })
+
+  it('requeueOrphanedJobs fails jobs that already exhausted their attempts', () => {
+    const poison = makeJob()!
+    markJobProcessing(poison)
+    requeueJob(poison, 'crash 1')
+    markJobProcessing(poison) // attempts now 2 == max; process "crashes" here
+    expect(requeueOrphanedJobs(NOW, 2)).toBe(1)
+    expect(getJob(poison)!.status).toBe('failed')
+    expect(getJob(poison)!.error).toMatch(/attempts/i)
+  })
+
   it('requeueOrphanedJobs: processing → pending, expired stays expired', () => {
     const fresh = makeJob({ expiresAt: NOW + 600 })!
     const stale = makeJob({ expiresAt: NOW - 10 })!

@@ -1,0 +1,7 @@
+# Tools:
+
+## Group tools
+
+All group tools have a parameter for the Q&A group id and they never return any info for
+
+1. Group list - return the list of monitored groups (names, ids, optional: descriptions)

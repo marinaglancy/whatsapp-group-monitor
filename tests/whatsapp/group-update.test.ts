@@ -56,6 +56,23 @@ describe('handleGroupsUpdate', () => {
     expect(getGroupMembers('g1@g.us').map(m => m.userJid)).toContain('member@lid')
   })
 
+  it('upserts directly from a full-metadata event without fetching (sync echo)', async () => {
+    // groupFetchAllParticipating emits groups.update with FULL metadata for every
+    // group; the handler must not answer that with one RPC per group
+    const sock = fakeSock({}) // any groupMetadata call would throw 'not found'
+    await handleGroupsUpdate([{
+      id: 'g1@g.us',
+      subject: 'Renamed Via Event',
+      announce: true,
+      participants: [{ id: BOT_ID, admin: 'admin' }, { id: 'member@lid' }],
+    } as never], sock)
+    const g = getGroup('g1@g.us')!
+    expect(g.name).toBe('Renamed Via Event')
+    expect(g.botMembership).toBe('admin')
+    expect(g.qaEnabled).toBe(true) // config still preserved
+    expect(getGroupMembers('g1@g.us').map(m => m.userJid)).toContain('member@lid')
+  })
+
   it('logs and continues when metadata cannot be fetched', async () => {
     const sock = fakeSock({})
     await expect(handleGroupsUpdate([{ id: 'g1@g.us', subject: 'X' }], sock)).resolves.toBeUndefined()

@@ -100,7 +100,7 @@
         for (const j of data.jobs) {
           const status = '<span class="badge st-' + j.status + '">' + j.status + '</span>';
           const group = j.groupJid ? '<a class="group-link" href="/group/' + encodeURIComponent(j.groupJid) + '">' + escHtml(j.groupName || j.groupJid) + '</a>' : '<span class="muted">-</span>';
-          const user = j.userJid ? '<a class="group-link" href="/user/' + encodeURIComponent(j.userJid) + '">' + escHtml(j.userJid) + '</a>' : '<span class="muted">-</span>';
+          const user = j.userJid ? '<a class="group-link" href="/user/' + encodeURIComponent(j.userJid) + '">' + escHtml(j.userName || j.userJid) + '</a>' : '<span class="muted">-</span>';
           const summary = j.error ? escHtml(j.error.split('\n')[0].slice(0, 80)) : (j.result ? escHtml(JSON.stringify(j.result).slice(0, 80)) : '<span class="muted">-</span>');
           html += '<tr><td><a class="job-link" href="/job/' + j.id + '"><strong>' + j.id + '</strong></a></td><td>' + escHtml(j.jobType) + '</td><td>' + status + '</td><td>' + group + '</td><td>' + user + '</td><td>' + fmtTs(j.createdAt) + '</td><td class="num">' + j.attempts + '</td><td class="num">' + j.aiCalls + '</td><td class="num">' + j.tokensTotal + '</td><td>' + summary + '</td></tr>';
         }
