@@ -15,10 +15,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 let cache: ToolDeclaration[] | null = null
 
-/** The declarations exactly as authored in group-tools.json (including _-metadata). */
+/** The declarations exactly as authored in declarations.json (including _-metadata). */
 export function rawToolDeclarations(): (ToolDeclaration & Record<string, unknown>)[] {
   if (!cache) {
-    cache = JSON.parse(readFileSync(join(__dirname, 'group-tools.json'), 'utf8')) as ToolDeclaration[]
+    cache = JSON.parse(readFileSync(join(__dirname, 'declarations.json'), 'utf8')) as ToolDeclaration[]
   }
   return cache as (ToolDeclaration & Record<string, unknown>)[]
 }
