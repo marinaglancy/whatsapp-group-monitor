@@ -491,6 +491,17 @@ export function qActivityStats(ctx: QaToolQueryCtx, opts: {
   return out
 }
 
+// --- shared lookups ----------------------------------------------------------
+
+/** Batch name/phone lookup for building person strings in the executor layer. */
+export function qUsersByJids(jids: string[]): Map<string, { name: string | null; phone: string | null }> {
+  if (!jids.length) return new Map()
+  const db = getAccountDb()
+  const rows = db.all<{ jid: string; name: string | null; phone: string | null }>(sql`
+    SELECT jid, display_name AS name, phone_number AS phone FROM users WHERE jid IN (${inList(jids)})`)
+  return new Map(rows.map(r => [r.jid, { name: r.name, phone: r.phone }]))
+}
+
 // --- message_search ----------------------------------------------------------
 
 export function buildFtsMatch(query: string[]): string | null {
