@@ -242,6 +242,17 @@ describe('qSearchMessages', () => {
     expect(hits[0].snippet).toContain('picnic')
   })
 
+  it('finds polls by their question and options with type poll', () => {
+    const { hits } = qSearchMessages({ groupJids: A }, { query: ['training'], from: 0, to: 100_000, order: 'desc', limit: 20, offset: 0 })
+    expect(hits.map(h => h.messageId)).toEqual(['M5'])
+    expect(hits[0].type).toBe('poll')
+  })
+
+  it('finds documents by attachment filename', () => {
+    const { hits } = qSearchMessages({ groupJids: A }, { query: ['report'], from: 0, to: 100_000, order: 'desc', limit: 20, offset: 0 })
+    expect(hits.map(h => h.messageId)).toEqual(['M4'])
+  })
+
   it('supports OR alternatives and phrases', () => {
     const { hits } = qSearchMessages({ groupJids: AB }, { query: ['"beta chatter"', 'hello'], from: 0, to: 100_000, order: 'asc', limit: 20, offset: 0 })
     expect(hits.map(h => h.messageId)).toEqual(['M1', 'B1'])

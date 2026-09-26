@@ -1,4 +1,5 @@
 import { sql, type SQL } from 'drizzle-orm'
+import { ftsTextSqlExpr } from '../fts-expr.js'
 import { getAccountDb } from '../account.js'
 
 /** Typed query layer behind the Q&A tools. Everything here speaks unix seconds
@@ -591,7 +592,7 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
   const total = db.get<{ cnt: number }>(sql`SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
   const rows = db.all<Record<string, unknown>>(sql`
     SELECT t.message_id AS message_id, t.group_jid AS group_jid, t.user_jid AS user_jid, t.timestamp AS ts,
-           t.event_type AS etype, json_extract(h.metadata, '$.text') AS hit_text
+           t.event_type AS etype, ${sql.raw(ftsTextSqlExpr('h.'))} AS hit_text
     ${joins}
     GROUP BY t.id
     ORDER BY t.timestamp ${dir}, t.id ${dir}

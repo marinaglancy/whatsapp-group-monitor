@@ -5,6 +5,7 @@ import { mkdirSync, copyFileSync, unlinkSync } from 'fs'
 import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
 import * as schema from './schema.js'
+import { ftsTextSqlExpr, FTS_EVENT_TYPES, FTS_GENERATION } from './fts-expr.js'
 
 let db: ReturnType<typeof drizzle<typeof schema>> | null = null
 let accountSqlite: InstanceType<typeof Database> | null = null
@@ -169,10 +170,21 @@ export function initAccountDb(phone: string) {
     sqlite.exec('ALTER TABLE groups ADD COLUMN description TEXT')
   }
 
-  // Full-text index over message/edit texts (message_search tool). Contentless
-  // FTS5 keyed by group_activity_log.id; created with a one-off backfill, then
-  // maintained by an insert trigger (activity rows are insert-only).
-  const hasFts = !!sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'").get()
+  // Full-text index over searchable content (message_search tool): message/edit
+  // texts, poll questions+options, event names+descriptions, attachment
+  // filenames — see src/db/fts-expr.ts, the single source of the expression.
+  // Contentless FTS5 keyed by group_activity_log.id; one-off backfill, then
+  // maintained by an insert trigger (activity rows are insert-only). A
+  // generation marker in the trigger comment lets us rebuild outdated indexes.
+  const generationTag = `/* fts-gen:${FTS_GENERATION} */`
+  const existingTrigger = sqlite.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='trg_fts_activity'",
+  ).get() as { sql: string } | undefined
+  const outdated = !!existingTrigger && !existingTrigger.sql.includes(generationTag)
+  if (outdated) {
+    sqlite.exec('DROP TRIGGER IF EXISTS trg_fts_activity; DROP TABLE IF EXISTS messages_fts;')
+  }
+  const hasFts = !outdated && !!sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'").get()
   if (!hasFts) {
     // atomic: a crash between CREATE and backfill would otherwise leave an
     // empty index that the hasFts guard treats as complete forever
@@ -181,8 +193,8 @@ export function initAccountDb(phone: string) {
       sqlite.exec(`
         CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='', tokenize='porter unicode61');
         INSERT INTO messages_fts(rowid, text)
-          SELECT id, json_extract(metadata, '$.text') FROM group_activity_log
-          WHERE event_type IN ('message', 'edit') AND json_extract(metadata, '$.text') IS NOT NULL;
+          SELECT id, ${ftsTextSqlExpr('')} FROM group_activity_log
+          WHERE event_type IN ${FTS_EVENT_TYPES} AND ${ftsTextSqlExpr('')} <> '';
       `)
       sqlite.exec('COMMIT')
     } catch (err) {
@@ -191,10 +203,10 @@ export function initAccountDb(phone: string) {
     }
   }
   sqlite.exec(`
-    CREATE TRIGGER IF NOT EXISTS trg_fts_activity AFTER INSERT ON group_activity_log
-    WHEN new.event_type IN ('message', 'edit') AND json_extract(new.metadata, '$.text') IS NOT NULL
+    CREATE TRIGGER IF NOT EXISTS trg_fts_activity ${generationTag} AFTER INSERT ON group_activity_log
+    WHEN new.event_type IN ${FTS_EVENT_TYPES} AND ${ftsTextSqlExpr('new.')} <> ''
     BEGIN
-      INSERT INTO messages_fts(rowid, text) VALUES (new.id, json_extract(new.metadata, '$.text'));
+      INSERT INTO messages_fts(rowid, text) VALUES (new.id, ${ftsTextSqlExpr('new.')});
     END;
   `)
 
