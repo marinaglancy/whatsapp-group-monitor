@@ -59,35 +59,43 @@ describe('resolveQaScope', () => {
   it('expands a community to its current children', () => {
     updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['comm@g.us'] })
     const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us'])
-    expect(scope.entries[0].isCommunity).toBe(true)
-    expect(scope.entries[0].children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])
+    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us', 'qa@g.us'])
+    const comm = scope.entries.find(e => e.isCommunity)!
+    expect(comm.children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])
     expect(scope.names.get('a@g.us')).toBe('Alpha')
+  })
+
+  it('always includes the group itself, first and marked', () => {
+    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'] })
+    const scope = resolveQaScope('qa@g.us')
+    expect(scope.groupJids).toEqual(['qa@g.us', 'solo@g.us'])
+    expect(scope.entries[0]).toMatchObject({ jid: 'qa@g.us', isSelf: true })
+    expect(scope.entries.filter(e => e.isSelf).length).toBe(1)
+  })
+
+  it('does not duplicate an explicitly self-linked group', () => {
+    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['qa@g.us', 'solo@g.us'] })
+    const scope = resolveQaScope('qa@g.us')
+    expect(scope.groupJids).toEqual(['qa@g.us', 'solo@g.us'])
+    expect(scope.entries.filter(e => e.jid === 'qa@g.us').length).toBe(1)
   })
 
   it('dedupes overlap between a community and an explicitly linked child', () => {
     updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['comm@g.us', 'a@g.us', 'solo@g.us'] })
     const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us', 'solo@g.us'])
+    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us', 'qa@g.us', 'solo@g.us'])
   })
 
   it('silently drops vanished jids and communities with no children', () => {
     seedGroup('empty-comm@g.us', 'Empty Community', { isCommunity: true })
     updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['gone@g.us', 'empty-comm@g.us'] })
     const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids).toEqual([])
-    expect(scope.entries.length).toBe(1) // the empty community is listed, the vanished jid is not
+    expect(scope.groupJids).toEqual(['qa@g.us']) // only itself
+    expect(scope.entries.length).toBe(2) // self + the empty community; the vanished jid is not listed
   })
 
-  it('includes the QA group itself only when explicitly linked', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['qa@g.us'] })
+  it('returns an empty scope for unknown groups, self-only for unconfigured ones', () => {
     expect(resolveQaScope('qa@g.us').groupJids).toEqual(['qa@g.us'])
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'] })
-    expect(resolveQaScope('qa@g.us').groupJids).toEqual(['solo@g.us'])
-  })
-
-  it('returns an empty scope for unknown or unconfigured groups', () => {
-    expect(resolveQaScope('qa@g.us').groupJids).toEqual([])
     expect(resolveQaScope('nope@g.us').groupJids).toEqual([])
   })
 
@@ -96,7 +104,7 @@ describe('resolveQaScope', () => {
     seedGroup('c@g.us', 'Gamma', { parentCommunityJid: 'comm@g.us', botMembership: 'none' })
     updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['left@g.us', 'comm@g.us'] })
     const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us'])
+    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us', 'qa@g.us'])
     expect(scope.entries.find(e => e.jid === 'left@g.us')).toBeUndefined()
     const comm = scope.entries.find(e => e.jid === 'comm@g.us')!
     expect(comm.children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])

@@ -41,8 +41,13 @@ describe('getAiSettings', () => {
     expect(getAiSettings().timezone).toBe(DEFAULT_TIMEZONE)
   })
 
-  it('ships a default prompt that references the timezone via placeholder', () => {
+  it('ships a default prompt that references the timezone and bot lid via placeholders', () => {
     expect(DEFAULT_QA_SYSTEM_PROMPT).toContain('{{timezone}}')
+    expect(DEFAULT_QA_SYSTEM_PROMPT).toContain('{{botlid}}')
+  })
+
+  it('never exposes the "Q&A" app jargon to the model', () => {
+    expect(DEFAULT_QA_SYSTEM_PROMPT).not.toMatch(/Q&A/i)
   })
 
   it('falls back to the default prompt when the stored one is blank', () => {

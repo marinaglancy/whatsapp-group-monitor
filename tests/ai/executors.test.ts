@@ -67,7 +67,7 @@ describe('group_list', () => {
   it('lists scope groups and communities with requested fields', () => {
     const out = run('group_list', { fields: ['is_community', 'parent_jid', 'member_count', 'bot_role', 'last_activity'] }, ctx)
     const names = out.groups.map((g: { name: string }) => g.name).sort()
-    expect(names).toEqual(['Alpha', 'Beta', 'Hive'])
+    expect(names).toEqual(['Admins', 'Alpha', 'Beta', 'Hive']) // the QA group itself is always in scope
     const alpha = out.groups.find((g: { jid: string }) => g.jid === 'a@g.us')
     expect(alpha.member_count).toBe(2)
     expect(alpha.bot_role).toBe('admin')
@@ -75,7 +75,7 @@ describe('group_list', () => {
     expect(alpha.last_activity).toMatch(/^2026-09-15 \d{2}:\d{2}:\d{2}$/)
     const hive = out.groups.find((g: { jid: string }) => g.jid === 'comm@g.us')
     expect(hive.is_community).toBe(true)
-    expect(out.total).toBe(3)
+    expect(out.total).toBe(4)
     expect(out.has_more).toBe(false)
   })
 
@@ -128,7 +128,8 @@ describe('group_members', () => {
 
   it('accepts bare-digit participant_lids in stats', () => {
     const out = run('activity_stats', { ranges: [{ from: '2026-09-15', to: '2026-09-15' }], participant_lids: ['anna'] }, ctx)
-    expect(out.rows[0].counts.primary.messages).toBe(1)
+    const alpha = out.rows.find((r: { group_jid: string }) => r.group_jid === 'a@g.us')
+    expect(alpha.counts.primary.messages).toBe(1)
   })
 })
 
@@ -165,8 +166,8 @@ describe('group_messages', () => {
 describe('activity_stats', () => {
   it('produces category blocks, members and the total row with formatted ranges', () => {
     const out = run('activity_stats', { ranges: [{ from: '2026-09-15', to: '2026-09-15' }] }, ctx)
-    expect(out.rows.map((r: { group_jid: string }) => r.group_jid)).toEqual(['a@g.us', 'b@g.us', 'total'])
-    const a = out.rows[0]
+    expect(out.rows.map((r: { group_jid: string }) => r.group_jid)).toEqual(['qa@g.us', 'a@g.us', 'b@g.us', 'total'])
+    const a = out.rows[1]
     expect(a.group_name).toBe('Alpha')
     expect(a.range).toEqual({ from: '2026-09-15 00:00:00', to: '2026-09-15 23:59:59' })
     expect(a.counts.primary.messages).toBe(2)
@@ -178,8 +179,9 @@ describe('activity_stats', () => {
 
   it('omits members when filtering by a single participant', () => {
     const out = run('activity_stats', { ranges: [{ from: '2026-09-15', to: '2026-09-15' }], participant_lids: [ANNA] }, ctx)
-    expect(out.rows[0].members).toBeUndefined()
-    expect(out.rows[0].counts.primary.messages).toBe(1)
+    const alpha = out.rows.find((r: { group_jid: string }) => r.group_jid === 'a@g.us')
+    expect(alpha.members).toBeUndefined()
+    expect(alpha.counts.primary.messages).toBe(1)
   })
 
   it('rejects more than 12 ranges', () => {

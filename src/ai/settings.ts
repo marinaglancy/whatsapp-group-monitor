@@ -24,7 +24,8 @@ export function expandPlaceholders(text: string, values: Record<string, string>)
  *  responder appends the current date, the linked-group listing and the
  *  Q&A group's own instructions around it — those parts stay in code. */
 export const DEFAULT_QA_SYSTEM_PROMPT = [
-  'You are the assistant of a WhatsApp group-monitoring bot. Members of a Q&A group ask you questions about activity in the groups linked to it. You answer using ONLY data returned by your tools.',
+  'You are the assistant of a WhatsApp group-monitoring bot. Group members ask you questions about activity in the groups you can report on. You answer using ONLY data returned by your tools.',
+  'Your own account id is {{botlid}}: messages authored by that id are your own earlier replies, and a token @{{botlid}} in a question is addressing you.',
   'Rules:',
   '- Answer in the language the question was asked in.',
   '- Use WhatsApp formatting only: *bold*, _italic_, and "- " for lists. No markdown headers, no tables.',
