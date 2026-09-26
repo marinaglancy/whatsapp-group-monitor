@@ -535,27 +535,21 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
 
   const authorCond = opts.authorLid ? sql` AND t.user_jid = ${opts.authorLid}` : sql``
   const dir = opts.order === 'desc' ? sql`DESC` : sql`ASC`
-  // snippet() only works when the FTS table drives the query; MATERIALIZED
-  // stops the flattener from inlining the subquery into the join
   const joins = sql`
-    FROM fhits f
-    JOIN group_activity_log h ON h.id = f.rid
+    FROM messages_fts f
+    JOIN group_activity_log h ON h.id = f.rowid
     JOIN group_activity_log t
       ON t.group_jid = h.group_jid
      AND t.message_id = CASE WHEN h.event_type = 'edit' THEN h.parent_id ELSE h.message_id END
      AND t.event_type IN ('message', 'poll_create', 'event_create')
-    WHERE t.group_jid IN (${inList(jids)})
+    WHERE messages_fts MATCH ${match}
+      AND t.group_jid IN (${inList(jids)})
       AND t.timestamp BETWEEN ${opts.from} AND ${opts.to}${authorCond}`
 
-  const withFts = sql`WITH fhits AS MATERIALIZED (
-      SELECT rowid AS rid, snippet(messages_fts, 0, '', '', '…', 12) AS snip
-      FROM messages_fts WHERE messages_fts MATCH ${match}
-    )`
-  const total = db.get<{ cnt: number }>(sql`${withFts} SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
+  const total = db.get<{ cnt: number }>(sql`SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
   const rows = db.all<Record<string, unknown>>(sql`
-    ${withFts}
     SELECT t.message_id AS message_id, t.group_jid AS group_jid, t.user_jid AS user_jid, t.timestamp AS ts,
-           f.snip AS snip
+           json_extract(h.metadata, '$.text') AS hit_text
     ${joins}
     GROUP BY t.id
     ORDER BY t.timestamp ${dir}, t.id ${dir}
@@ -567,8 +561,31 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
       groupJid: r.group_jid as string,
       authorLid: r.user_jid as string,
       timestamp: r.ts as number,
-      snippet: (r.snip as string) ?? '',
+      snippet: makeSnippet((r.hit_text as string | null) ?? '', opts.query),
     })),
     total,
   }
+}
+
+/** Short excerpt around the first matched term (SQL snippet() misbehaves once
+ *  the FTS table is joined, so this is done in JS over the hit row's text). */
+function makeSnippet(text: string, query: string[], width = 100): string {
+  const terms: string[] = []
+  for (const entry of query) {
+    const rest = String(entry).replace(/"([^"]*)"/g, (_m, p: string) => {
+      if (p.trim()) terms.push(p.trim())
+      return ' '
+    })
+    for (const w of rest.split(/\s+/)) if (w) terms.push(w)
+  }
+  const lower = text.toLowerCase()
+  let idx = -1
+  for (const term of terms) {
+    const i = lower.indexOf(term.toLowerCase())
+    if (i >= 0 && (idx < 0 || i < idx)) idx = i
+  }
+  if (idx < 0) return text.length > width ? text.slice(0, width) + '…' : text
+  const start = Math.max(0, idx - Math.floor(width / 3))
+  const end = Math.min(text.length, start + width)
+  return (start > 0 ? '…' : '') + text.slice(start, end) + (end < text.length ? '…' : '')
 }
