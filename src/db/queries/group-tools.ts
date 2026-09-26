@@ -11,6 +11,25 @@ export interface QaToolQueryCtx {
   groupJids: string[]
 }
 
+/** Per group: the earliest moment data exists — the earlier of the first
+ *  recorded activity (history sync can reach back before the group row) and
+ *  when the monitor first saw the group. Unix seconds. */
+export function qDataSince(groupJids: string[]): Map<string, number> {
+  if (!groupJids.length) return new Map()
+  const db = getAccountDb()
+  const rows = db.all<{ jid: string; since: number }>(sql`
+    SELECT g.jid,
+      CASE WHEN m.min_ts IS NOT NULL AND m.min_ts < g.created_at/1000
+           THEN m.min_ts ELSE g.created_at/1000 END AS since
+    FROM groups g
+    LEFT JOIN (
+      SELECT group_jid, MIN(timestamp) AS min_ts FROM group_activity_log
+      WHERE group_jid IN (${inList(groupJids)}) GROUP BY group_jid
+    ) m ON m.group_jid = g.jid
+    WHERE g.jid IN (${inList(groupJids)})`)
+  return new Map(rows.map(r => [r.jid, Math.floor(r.since)]))
+}
+
 const PRIMARY = ['message', 'poll_create', 'event_create'] as const
 const SECONDARY = ['reaction', 'poll_vote', 'event_response'] as const
 

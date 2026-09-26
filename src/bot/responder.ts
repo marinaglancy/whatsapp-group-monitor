@@ -7,7 +7,7 @@ import { resolveQaScope, type QaScope } from './scope.js'
 import { getBotUser } from '../whatsapp/handlers/connection.js'
 import { getCreationRecord } from '../db/queries/activity.js'
 import { getJob, addJobAiUsage, addJobEvent, getJobEvents, hasJobEvent, sumAiCallsToday } from '../db/queries/jobs.js'
-import { qUsersByJids } from '../db/queries/group-tools.js'
+import { qUsersByJids, qDataSince } from '../db/queries/group-tools.js'
 import { formatDateTime } from '../utils/time.js'
 import type { JobHandler } from './worker.js'
 import { logger } from '../utils/logger.js'
@@ -192,14 +192,25 @@ function buildSystemPrompt(scope: QaScope, nowMs: number, settings: AiSettings, 
   lines.push('')
   lines.push(`Current date and time: ${formatDateTime(new Date(nowMs), settings.timezone)} (${settings.timezone}).`)
   lines.push('Groups you can report on:')
+  // each concrete group carries the date its data starts — before it, nothing
+  // is recorded (communities are containers, their children carry the dates)
+  const dataSince = qDataSince(scope.groupJids)
+  const sinceDate = (jid: string): string | null => {
+    const s = dataSince.get(jid)
+    return s ? formatDateTime(s, settings.timezone).slice(0, 10) : null
+  }
   for (const e of scope.entries) {
+    const d = sinceDate(e.jid)
     if (e.isSelf) {
-      lines.push(`- "${e.name}" (${e.jid}) — the group where this question was asked`)
+      lines.push(`- "${e.name}" (${e.jid}) — the group where this question was asked${d ? `, data since ${d}` : ''}`)
     } else if (e.isCommunity) {
       lines.push(`- Community "${e.name}" (${e.jid}), containing:`)
-      for (const c of e.children) lines.push(`  - "${c.name}" (${c.jid})`)
+      for (const c of e.children) {
+        const cd = sinceDate(c.jid)
+        lines.push(`  - "${c.name}" (${c.jid})${cd ? ` — data since ${cd}` : ''}`)
+      }
     } else {
-      lines.push(`- "${e.name}" (${e.jid})`)
+      lines.push(`- "${e.name}" (${e.jid})${d ? ` — data since ${d}` : ''}`)
     }
   }
   if (scope.qaInstructions) {

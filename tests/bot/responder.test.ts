@@ -105,6 +105,24 @@ describe('qa_answer handler', () => {
     expect(call.system).toContain('the group where this question was asked')
   })
 
+  it('annotates every scope group with its data-since date', async () => {
+    seedGroup('comm@g.us', 'Hive', { isCommunity: true })
+    seedGroup('c@g.us', 'Child', { parentCommunityJid: 'comm@g.us' })
+    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['a@g.us', 'comm@g.us'] })
+    seedMessage('a@g.us', 'asker@lid', 'old alpha message', NOW_S - 5 * 86400)
+    const provider = fakeProvider([{ text: 'ok' }])
+    await makeHandler(provider)(makeJob())
+    const sys = provider.calls[0].system
+    const alphaSince = new Date((NOW_S - 5 * 86400) * 1000).toISOString().slice(0, 10)
+    expect(sys).toContain(`- "Alpha" (a@g.us) — data since ${alphaSince}`)
+    // the question group keeps its marker and gains the date
+    expect(sys).toMatch(/"Admins" \(qa@g\.us\) — the group where this question was asked, data since \d{4}-\d{2}-\d{2}/)
+    // a silent child group falls back to when the monitor first saw it
+    expect(sys).toMatch(/ {2}- "Child" \(c@g\.us\) — data since \d{4}-\d{2}-\d{2}/)
+    // the community container itself carries no date
+    expect(sys).toMatch(/- Community "Hive" \(comm@g\.us\), containing:\n/)
+  })
+
   it('builds the first user turn: preamble, recent context, question', async () => {
     seedMessage('qa@g.us', BOT_LID, 'Earlier answer', NOW_S - 100)
     seedMessage('qa@g.us', 'asker@lid', 'Earlier question', NOW_S - 120)
