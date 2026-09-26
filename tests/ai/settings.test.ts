@@ -54,6 +54,11 @@ describe('getAiSettings', () => {
     expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/join date/i)
   })
 
+  it('tells the model that empty results are answers and monitoring has a start date', () => {
+    expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/empty result is an answer/i)
+    expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/monitor(ed|ing) only (from|since)/i)
+  })
+
   it('falls back to the default prompt when the stored one is blank', () => {
     setSetting('ai_system_prompt', '   ')
     expect(getAiSettings().systemPrompt).toBe(DEFAULT_QA_SYSTEM_PROMPT)

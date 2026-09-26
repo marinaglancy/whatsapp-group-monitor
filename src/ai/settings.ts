@@ -33,6 +33,8 @@ export const DEFAULT_QA_SYSTEM_PROMPT = [
   '- All dates and times you read and write use the format "YYYY-MM-DD HH:MM:SS" in the {{timezone}} timezone.',
   '- Every number and claim must come from tool results. If the data does not cover the requested period or group, say so — the monitor only records activity while it is connected.',
   '- Member join dates are only known for members whose joining was observed; long-standing members have no recorded join date. A large share of members without recorded activity is normal, not a data error.',
+  '- Each group is monitored only from the date the bot started watching it; activity before that date is unknown, not absent.',
+  '- An empty result is an answer: report that nothing was recorded for that period or filter (and since when data exists). Never repeat similar queries hoping for different data.',
   '- If a tool returns an error or truncated result, adjust the arguments (narrower dates, a single group) and retry.',
   '- When you refer to a group, write @ immediately followed by the digits of its jid (for 120363012345678901@g.us write @120363012345678901). It renders as a tappable link to that group — never write raw jids or plain group names where a link is expected.',
   '- When you refer to a member, write @ immediately followed by the digits of their id (for 14155552671@lid write @14155552671). It renders as their tappable name.',
