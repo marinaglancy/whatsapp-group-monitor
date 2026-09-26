@@ -62,6 +62,14 @@ describe('/api/settings AI keys', () => {
     expect(body.ai_daily_limit).toBe('100')
   })
 
+  it('settings page contains the AI assistant section', async () => {
+    const res = await app.inject({ method: 'GET', url: '/settings', headers: { cookie: auth.cookie } })
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toContain('id="gemini_api_key"')
+    expect(res.body).toContain('id="gemini_model"')
+    expect(res.body).toContain('id="ai_daily_limit"')
+  })
+
   it('rejects a POST without CSRF', async () => {
     const res = await app.inject({
       method: 'POST', url: '/api/settings',

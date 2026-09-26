@@ -60,6 +60,18 @@
         <label for="page_size">Items per page</label>
         <input type="number" id="page_size" name="page_size" min="10" max="500" />
 
+        <h2 style="margin-top:2rem">AI assistant</h2>
+        <label for="gemini_model">Gemini model</label>
+        <input type="text" id="gemini_model" name="gemini_model" placeholder="gemini-3.8-flash" />
+
+        <label for="gemini_api_key">Gemini API key</label>
+        <input type="password" id="gemini_api_key" name="gemini_api_key" autocomplete="off" />
+        <p id="key-hint" style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem"></p>
+        <button type="button" id="clear-key" style="display:none;background:none;border:none;color:#c62828;font-size:0.8rem;cursor:pointer;padding:0;margin:-0.5rem 0 1rem" onclick="clearKey()">Clear stored key</button>
+
+        <label for="ai_daily_limit">Daily AI call limit (0 = unlimited)</label>
+        <input type="number" id="ai_daily_limit" name="ai_daily_limit" min="0" />
+
         <button type="submit" class="save-btn">Save</button>
         <p class="msg" id="msg"></p>
       </form>
@@ -67,6 +79,7 @@
   </div>
   <script>
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    let keySet = false;
 
     async function load() {
       try {
@@ -74,24 +87,60 @@
         const data = await res.json();
         document.getElementById('project_name').value = data.project_name || '';
         document.getElementById('page_size').value = data.page_size || '50';
+        document.getElementById('gemini_model').value = data.gemini_model || '';
+        document.getElementById('ai_daily_limit').value = data.ai_daily_limit || '300';
+        keySet = !!data.gemini_api_key_set;
+        updateKeyHint();
       } catch (e) {
         showMsg('Failed to load settings', false);
       }
     }
 
-    async function save(e) {
-      e.preventDefault();
+    function updateKeyHint() {
+      document.getElementById('key-hint').textContent = keySet
+        ? 'A key is configured. Leave blank to keep it; type a new key to replace it.'
+        : 'No key configured. Group content is sent to Google Gemini when the bot answers.';
+      document.getElementById('clear-key').style.display = keySet ? 'inline' : 'none';
+      document.getElementById('gemini_api_key').placeholder = keySet ? '••••••••' : '';
+    }
+
+    async function clearKey() {
+      if (!confirm('Remove the stored Gemini API key?')) return;
       try {
         const res = await fetch('/api/settings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-          body: JSON.stringify({
-            project_name: document.getElementById('project_name').value,
-            page_size: document.getElementById('page_size').value,
-          }),
+          body: JSON.stringify({ gemini_api_key: '' }),
         });
-        if (res.ok) showMsg('Settings saved', true);
-        else showMsg('Failed to save', false);
+        if (res.ok) { keySet = false; updateKeyHint(); showMsg('Key removed', true); return; }
+      } catch (e) { /* fall through */ }
+      showMsg('Failed to remove key', false);
+    }
+
+    async function save(e) {
+      e.preventDefault();
+      try {
+        const payload = {
+          project_name: document.getElementById('project_name').value,
+          page_size: document.getElementById('page_size').value,
+          gemini_model: document.getElementById('gemini_model').value,
+          ai_daily_limit: document.getElementById('ai_daily_limit').value,
+        };
+        const keyInput = document.getElementById('gemini_api_key').value;
+        if (keyInput) payload.gemini_api_key = keyInput; // omit when blank so the stored key is kept
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          if (keyInput) {
+            keySet = true;
+            document.getElementById('gemini_api_key').value = '';
+            updateKeyHint();
+          }
+          showMsg('Settings saved', true);
+        } else showMsg('Failed to save', false);
       } catch (e) {
         showMsg('Failed to save', false);
       }
