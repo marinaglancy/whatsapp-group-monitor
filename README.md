@@ -50,6 +50,42 @@ npm run dev
 2. Scan the QR code with WhatsApp (Linked Devices > Link a Device)
 3. The dashboard shows all groups the account is in, with member counts and activity stats
 
+## AI Q&A Assistant
+
+You can designate **Q&A groups**: WhatsApp groups whose members can ask the bot
+questions about activity in other monitored groups — message counts, conversation
+summaries, most/least active members, poll attendance.
+
+Setup:
+
+1. Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/) and enter
+   it on the **Settings** page. The model, a daily call limit, the timezone used for all
+   dates, and the main system prompt (placeholders: `{{timezone}}`, `{{botlid}}`) are
+   configurable there too.
+2. Open the group's page in the panel, enable **Q&A assistant** in the Bot card, and
+   link the groups and/or communities it may report on. Linking a community covers all
+   its groups, including ones added later. The Q&A group itself is always included, and
+   per-group instructions can adjust the bot's tone or language.
+3. Members of the Q&A group talk to the bot by **@mentioning** the connected account
+   or **replying** to one of its messages. Replying to an answer continues that
+   conversation — the bot re-reads the earlier exchange. It also sees the group's
+   recent messages (up to 20, at most 48 hours old) as context.
+
+Every question becomes a **job** — see the **Bot jobs** page (linked from the status
+bar) for status, the full AI interaction trail and token usage of each one. Answers
+are based only on activity this monitor has recorded; the bot cannot see history from
+before it was connected (except what WhatsApp's history sync provided).
+
+For debugging, two commands answer without calling the AI: `@bot !tools` lists the
+data tools, and `@bot !tool <name> <json-args>` runs one and echoes its raw result.
+
+### Privacy note
+
+When the bot answers, message content from the linked groups is sent to Google's
+Gemini API. On the **free tier Google uses submitted content to improve its products
+(including human review); the paid tier does not.** If the linked groups are private,
+use a paid-tier API key. See Google's current Gemini API terms for details.
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -91,7 +127,7 @@ Only one WhatsApp account can be connected at a time. Activity is only tracked w
 
 ## Tech Stack
 
-Baileys (WhatsApp Web) + Fastify + SQLite (better-sqlite3) + Drizzle ORM + TypeScript
+Baileys (WhatsApp Web) + Fastify + SQLite (better-sqlite3) + Drizzle ORM + TypeScript + @google/genai (Gemini)
 
 ## License
 
