@@ -373,7 +373,7 @@ const executors: Record<string, Executor> = {
     })
     const users = qUsersByJids([...new Set(hits.map(h => h.authorLid))])
     const rows = hits.map(h => ({
-      message_id: h.messageId,
+      id: h.messageId,
       group_jid: h.groupJid,
       group_name: ctx.scope.names.get(h.groupJid) ?? h.groupJid,
       sent_at: formatDateTime(h.timestamp, ctx.timezone),

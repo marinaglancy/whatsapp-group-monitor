@@ -192,7 +192,7 @@ describe('message_search', () => {
   it('searches within scope and formats hits', () => {
     const out = run('message_search', { query: ['picnic'] }, ctx)
     expect(out.total).toBe(1)
-    expect(out.hits[0].message_id).toBe('M1')
+    expect(out.hits[0].id).toBe('M1')
     expect(out.hits[0].group_name).toBe('Alpha')
     expect(out.hits[0].author).toEqual({ lid: ANNA, name: 'Anna' })
     expect(out.hits[0].sent_at).toMatch(/^2026-09-15 /)

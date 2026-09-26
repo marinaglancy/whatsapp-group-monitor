@@ -384,7 +384,7 @@
             "properties": {
               "id": {
                 "type": "string",
-                "description": "WhatsApp's message id, unique within the group. reply_to_id and message_search.message_id use the same id space."
+                "description": "WhatsApp's message id, unique within the group. reply_to_id and message_search hits use the same id space and name."
               },
               "group_jid": {
                 "type": "string"
@@ -857,9 +857,9 @@
           "items": {
             "type": "object",
             "properties": {
-              "message_id": {
+              "id": {
                 "type": "string",
-                "description": "WhatsApp's message id (same id space as group_messages.id)."
+                "description": "WhatsApp's message id (same id space and name as group_messages.id)."
               },
               "group_jid": {
                 "type": "string"
@@ -891,7 +891,7 @@
               }
             },
             "required": [
-              "message_id",
+              "id",
               "group_jid",
               "group_name",
               "sent_at",
