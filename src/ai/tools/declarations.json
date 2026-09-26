@@ -870,9 +870,20 @@
               "sent_at": {
                 "type": "string"
               },
-              "author_name": {
-                "type": "string",
-                "description": "Display name when known; may be absent."
+              "author": {
+                "type": "object",
+                "properties": {
+                  "lid": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Display name when known; may be absent."
+                  }
+                },
+                "required": [
+                  "lid"
+                ]
               },
               "snippet": {
                 "type": "string",
@@ -884,7 +895,8 @@
               "group_jid",
               "group_name",
               "sent_at",
-              "snippet"
+              "snippet",
+              "author"
             ]
           }
         },
