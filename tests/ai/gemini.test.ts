@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { toGeminiContents, toGeminiTools, fromGeminiResponse } from '../../src/ai/gemini.js'
+import { toGeminiContents, toGeminiTools, toGeminiConfig, fromGeminiResponse } from '../../src/ai/gemini.js'
 
 describe('toGeminiContents', () => {
   it('maps user, assistant tool-calls, tool results and assistant text', () => {
@@ -65,6 +65,24 @@ describe('toGeminiTools', () => {
 
   it('returns undefined for an empty tool list', () => {
     expect(toGeminiTools([])).toBeUndefined()
+  })
+})
+
+describe('toGeminiConfig', () => {
+  const tool = { name: 'group_list', description: 'List groups.', parameters: { type: 'object' } }
+
+  it('lets the model call tools by default', () => {
+    const c = toGeminiConfig({ system: 'SYS', messages: [], tools: [tool] })
+    expect(c.systemInstruction).toBe('SYS')
+    expect(c.tools?.[0].functionDeclarations).toHaveLength(1)
+    expect(c.toolConfig).toBeUndefined()
+  })
+
+  it('keeps the tools declared but forbids calling them when tool calls are off', () => {
+    // the history still holds earlier function calls, which need their declarations
+    const c = toGeminiConfig({ system: 'SYS', messages: [], tools: [tool], allowToolCalls: false })
+    expect(c.tools?.[0].functionDeclarations).toHaveLength(1)
+    expect(c.toolConfig).toEqual({ functionCallingConfig: { mode: 'NONE' } })
   })
 })
 

@@ -11,10 +11,16 @@ export const MAX_JOB_ATTEMPTS = 2
 /** Hard cap per handler invocation, so a hung socket call cannot wedge the worker. */
 export const WORKER_JOB_TIMEOUT_MS = 120_000
 
+/** The watchdog gave up on a handler that is still running in the background.
+ *  Never retried: a second attempt could act twice (e.g. reply twice). */
+class WatchdogTimeout extends Error {}
+
 export type JobHandler = (job: BotJob) => Promise<Record<string, unknown> | undefined>
 export interface JobHandlerOptions {
-  /** Called once when the job transitions to 'failed' (attempts exhausted). */
+  /** Called once when the job transitions to 'failed'. */
   onFailure?: (job: BotJob, error: string) => Promise<void>
+  /** Whether this error is worth another attempt. Default: always retry. */
+  shouldRetry?: (err: unknown) => boolean
 }
 
 const handlers = new Map<string, { handler: JobHandler; opts: JobHandlerOptions }>()
@@ -98,7 +104,7 @@ async function runJob(job: BotJob): Promise<void> {
       entry.handler(fresh),
       new Promise<never>((_, reject) => {
         watchdog = setTimeout(
-          () => reject(new Error(`Job handler timed out after ${WORKER_JOB_TIMEOUT_MS / 1000}s`)),
+          () => reject(new WatchdogTimeout(`Job handler timed out after ${WORKER_JOB_TIMEOUT_MS / 1000}s`)),
           WORKER_JOB_TIMEOUT_MS,
         )
         watchdog.unref()
@@ -108,7 +114,10 @@ async function runJob(job: BotJob): Promise<void> {
     logger.info({ jobId: job.id, jobType: job.jobType }, 'Bot job done')
   } catch (err) {
     const message = err instanceof Error ? (err.stack || err.message) : String(err)
-    if (fresh.attempts < MAX_JOB_ATTEMPTS) {
+    const retry = fresh.attempts < MAX_JOB_ATTEMPTS
+      && !(err instanceof WatchdogTimeout)
+      && (entry.opts.shouldRetry?.(err) ?? true)
+    if (retry) {
       requeueJob(job.id, message)
       logger.warn({ jobId: job.id, err }, 'Bot job failed, will retry')
     } else {

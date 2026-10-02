@@ -36,6 +36,15 @@ export interface AiResponse {
   raw?: unknown
 }
 
+export interface AiRequest {
+  system: string
+  messages: AiChatMessage[]
+  tools: AiToolDef[]
+  /** false = the model must answer in text. The tools stay declared, because
+   *  the history may still hold earlier calls to them. Default true. */
+  allowToolCalls?: boolean
+}
+
 export interface AiProvider {
-  generate(req: { system: string; messages: AiChatMessage[]; tools: AiToolDef[] }): Promise<AiResponse>
+  generate(req: AiRequest): Promise<AiResponse>
 }

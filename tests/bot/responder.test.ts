@@ -7,7 +7,7 @@ import { updateGroupQaConfig } from '../../src/db/queries/groups.js'
 import { setSetting } from '../../src/db/queries/settings.js'
 import { insertJob, getJob, getJobEvents, addJobEvent, addJobAiUsage } from '../../src/db/queries/jobs.js'
 import {
-  createQaAnswerHandler, buildQaFailureNotifier, resetLimitNoticeForTests,
+  createQaAnswerHandler, buildQaFailureNotifier, resetLimitNoticeForTests, isTransientAiError,
   QA_MAX_ROUNDS, QA_ANSWER_MAX_CHARS, QA_THREAD_MAX_DEPTH,
 } from '../../src/bot/responder.js'
 import type { AiProvider } from '../../src/ai/provider.js'
@@ -103,6 +103,14 @@ describe('qa_answer handler', () => {
     expect(call.system).toContain('99887766001') // {{botlid}} expanded to lid digits
     expect(call.system).not.toContain('{{botlid}}')
     expect(call.system).toContain('the group where this question was asked')
+  })
+
+  it('tells the model how many rounds of tool calls it has', async () => {
+    const provider = fakeProvider([{ text: 'ok' }])
+    await makeHandler(provider)(makeJob())
+    // must follow the real limit, or the model plans for the wrong budget
+    // the last round has tools off, so one fewer round can call them
+    expect(provider.calls[0].system).toContain(`${QA_MAX_ROUNDS - 1} rounds`)
   })
 
   it('annotates every scope group with its data-since date', async () => {
@@ -284,10 +292,42 @@ describe('qa_answer handler', () => {
     expect(sent[0].text).toBe('Recovered fine.')
   })
 
-  it('fails after QA_MAX_ROUNDS of tool calls', async () => {
-    const provider = fakeProvider(Array.from({ length: QA_MAX_ROUNDS + 1 }, () => ({ toolCalls: [{ name: 'group_list', args: {} }] })))
-    await expect(makeHandler(provider)(makeJob())).rejects.toThrow(/rounds/i)
+  const toolRound = () => ({ toolCalls: [{ name: 'group_list', args: {} }] })
+
+  it('switches tool calls off on the last round, so the model has to answer', async () => {
+    const provider = fakeProvider([
+      ...Array.from({ length: QA_MAX_ROUNDS - 1 }, toolRound),
+      { text: 'Here is what I found so far.' },
+    ])
+    await makeHandler(provider)(makeJob())
+    expect(provider.calls.map(c => c.allowToolCalls)).toEqual([...Array(QA_MAX_ROUNDS - 1).fill(true), false])
+    expect(sent[0].text).toBe('Here is what I found so far.')
+  })
+
+  it('adds a note to the instructions on the last round only', async () => {
+    const provider = fakeProvider([...Array.from({ length: QA_MAX_ROUNDS - 1 }, toolRound), { text: 'ok' }])
+    await makeHandler(provider)(makeJob())
+    const normal = provider.calls[0].system
+    expect(provider.calls.slice(0, -1).every(c => c.system === normal)).toBe(true)
+    const last = provider.calls.at(-1)!.system
+    expect(last.startsWith(normal)).toBe(true)
+    expect(last.length).toBeGreaterThan(normal.length)
+  })
+
+  it('never runs tools on the last round, even if the model still asks for them', async () => {
+    const provider = fakeProvider(Array.from({ length: QA_MAX_ROUNDS }, toolRound))
+    const job = makeJob()
+    await expect(makeHandler(provider)(job)).rejects.toThrow(/switched off/i)
     expect(provider.calls.length).toBe(QA_MAX_ROUNDS)
+    expect(getJobEvents(job.id).filter(e => e.eventType === 'tool_call').length).toBe(QA_MAX_ROUNDS - 1)
+  })
+
+  it('logs on the job why tools were off', async () => {
+    const provider = fakeProvider([...Array.from({ length: QA_MAX_ROUNDS - 1 }, toolRound), { text: 'ok' }])
+    const job = makeJob()
+    await makeHandler(provider)(job)
+    const aiCalls = getJobEvents(job.id).filter(e => e.eventType === 'ai_call')
+    expect(aiCalls.map(e => e.data!.toolsOff)).toEqual([...Array(QA_MAX_ROUNDS - 1).fill(undefined), 'last round'])
   })
 
   it('fails on an empty provider response', async () => {
@@ -295,18 +335,31 @@ describe('qa_answer handler', () => {
     await expect(makeHandler(provider)(makeJob())).rejects.toThrow(/empty/i)
   })
 
-  it('fails when the wall clock budget is exhausted', async () => {
-    // The provider call itself consumes the whole budget, so the round-2
-    // deadline check fires. (Advancing the clock from the test body would be
-    // too late: the deadline is computed before the test regains control.)
-    let t = NOW_MS
-    const provider: AiProvider = {
-      async generate() {
-        t += 61_000
-        return { toolCalls: [{ name: 'group_list', args: {} }], usage: { tokensIn: 1, tokensOut: 1 } }
-      },
-    }
-    await expect(makeHandler(provider, () => t)(makeJob())).rejects.toThrow(/timed out/i)
+  // Each provider call advances the clock, the way a slow AI call would.
+  // (Advancing it from the test body would be too late: the deadline is
+  // computed before the test regains control.)
+  function slowProvider(script: Parameters<typeof fakeProvider>[0], msPerCall: number, clock: { t: number }) {
+    const provider = fakeProvider(script)
+    const generate = provider.generate.bind(provider)
+    provider.generate = async (req) => { clock.t += msPerCall; return generate(req) }
+    return provider
+  }
+
+  it('makes the next round the last one when time is almost up', async () => {
+    const clock = { t: NOW_MS }
+    const provider = slowProvider([toolRound(), { text: 'Answer under time pressure.' }], 50_000, clock)
+    const job = makeJob()
+    await makeHandler(provider, () => clock.t)(job)
+    expect(provider.calls.map(c => c.allowToolCalls)).toEqual([true, false])
+    expect(sent[0].text).toBe('Answer under time pressure.')
+    expect(getJobEvents(job.id).filter(e => e.eventType === 'ai_call').at(-1)!.data!.toolsOff).toBe('time almost up')
+  })
+
+  it('keeps tools on while there is plenty of time left', async () => {
+    const clock = { t: NOW_MS }
+    const provider = slowProvider([toolRound(), toolRound(), { text: 'done' }], 10_000, clock)
+    await makeHandler(provider, () => clock.t)(makeJob())
+    expect(provider.calls.map(c => c.allowToolCalls)).toEqual([true, true, true])
   })
 
   it('truncates over-long answers with a hint', async () => {
@@ -344,6 +397,12 @@ describe('failure notifier', () => {
     expect(sent[1].text).not.toContain('TypeError')
   })
 
+  it('does not mistake a line number in the stack for a 429', async () => {
+    const notify = makeNotifier()
+    await notify(makeJob(), "TypeError: boom\n    at handleQaAnswer (/app/src/bot/responder.ts:429:12)")
+    expect(sent[0].text).toMatch(/sorry/i)
+  })
+
   it('stays silent when the group already got a message for this job', async () => {
     const notify = makeNotifier()
     const limited = makeJob('limited q')
@@ -353,5 +412,32 @@ describe('failure notifier', () => {
     addJobEvent(answered.id, 'reply_sent', { messageId: 'X' })
     await notify(answered, 'crashed after send')
     expect(sent.length).toBe(0)
+  })
+})
+
+describe('isTransientAiError', () => {
+  // the Gemini SDK throws ApiError: an Error with a numeric HTTP status
+  const apiError = (status: number, message: string) => Object.assign(new Error(message), { status })
+
+  it.each([
+    ['429 rate limit', true, apiError(429, '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}')],
+    ['503 overloaded', true, apiError(503, '{"error":{"code":503,"message":"The model is overloaded."}}')],
+    ['500 internal', true, apiError(500, '{"error":{"code":500,"status":"INTERNAL"}}')],
+    ['400 bad request', false, apiError(400, '{"error":{"code":400,"message":"Function call is missing a thought_signature","status":"INVALID_ARGUMENT"}}')],
+    ['400 that mentions "unavailable"', false, apiError(400, '{"error":{"message":"field unavailable in this model"}}')],
+    ['network: fetch failed', true, new TypeError('fetch failed')],
+    ['network: connection reset', true, Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })],
+    // the SDK aborts with a plain controller.abort(), so our 30 s timeout surfaces as this
+    ['AI call timeout', true, new DOMException('This operation was aborted', 'AbortError')],
+    ['WhatsApp connection closed', true, Object.assign(new Error('Connection Closed'), { isBoom: true, output: { statusCode: 428 } })],
+    ['WhatsApp connection lost', true, Object.assign(new Error('Connection was lost'), { isBoom: true, output: { statusCode: 408 } })],
+    ['WhatsApp query timeout', true, Object.assign(new Error('Timed Out'), { isBoom: true, output: { statusCode: 408 } })],
+    ['daily limit set to 429', false, new Error('Daily AI call limit reached (429)')],
+    ['empty answer', false, new Error('AI returned an empty response')],
+    ['daily limit', false, new Error('Daily AI call limit reached (300)')],
+    ['bad job', false, new Error('qa_answer job has no question text or group')],
+    ['code bug', false, new TypeError("Cannot read properties of undefined (reading 'x')")],
+  ])('%s → retry: %s', (_label, want, err) => {
+    expect(isTransientAiError(err)).toBe(want)
   })
 })

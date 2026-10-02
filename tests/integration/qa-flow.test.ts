@@ -79,6 +79,37 @@ describe('qa flow end-to-end (AI responder)', () => {
     expect(getJobEvents(jobs[0].id).map(e => e.eventType)).toEqual(['ai_call', 'tool_call', 'ai_call', 'reply_sent'])
   })
 
+  // stands in for the Gemini SDK's ApiError: an Error with an HTTP status
+  function failingProvider(status: number) {
+    const failing = fakeProvider([])
+    let calls = 0
+    failing.generate = async () => { calls++; throw Object.assign(new Error(`{"error":{"code":${status}}}`), { status }) }
+    return { failing, calls: () => calls }
+  }
+
+  it('gives up at once on an AI error that a retry cannot fix, and apologizes', async () => {
+    const { failing, calls } = failingProvider(400)
+    provider = failing
+    ActivityRecord.fromMessage(incoming('@bot how active was Alpha?', 'INCOMING1'), 'qa@g.us')!.saveAndProcess()
+    await runWorkerPass()
+    const job = listJobs({ limit: 10, offset: 0 }).jobs[0]
+    expect(job.status).toBe('failed')
+    expect(job.attempts).toBe(1)
+    expect(calls()).toBe(1)
+    expect(sent.map(s => s.text)).toEqual([expect.stringMatching(/sorry/i)])
+  })
+
+  it('retries once when the AI service is busy', async () => {
+    const { failing, calls } = failingProvider(503)
+    provider = failing
+    ActivityRecord.fromMessage(incoming('@bot how active was Alpha?', 'INCOMING1'), 'qa@g.us')!.saveAndProcess()
+    await runWorkerPass()
+    const job = listJobs({ limit: 10, offset: 0 }).jobs[0]
+    expect(job.status).toBe('failed')
+    expect(job.attempts).toBe(2)
+    expect(calls()).toBe(2)
+  })
+
   it('threads a follow-up reply through the ancestor exchange', async () => {
     ActivityRecord.fromMessage(incoming('@bot how active was Alpha?', 'INCOMING1'), 'qa@g.us')!.saveAndProcess()
     await runWorkerPass()

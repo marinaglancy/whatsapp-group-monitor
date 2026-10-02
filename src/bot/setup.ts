@@ -3,7 +3,7 @@ import { ActivityRecord } from '../whatsapp/activity/record.js'
 import { registerJobHandler, type JobHandler } from './worker.js'
 import { registerSentMessage } from './sent-registry.js'
 import { resolveQaScope } from './scope.js'
-import { createQaAnswerHandler, buildQaFailureNotifier, type QaResponderDeps } from './responder.js'
+import { createQaAnswerHandler, buildQaFailureNotifier, isTransientAiError, type QaResponderDeps } from './responder.js'
 import { addJobEvent, hasJobEvent } from '../db/queries/jobs.js'
 import { getSock } from '../whatsapp/client.js'
 import { getCreationRecord } from '../db/queries/activity.js'
@@ -211,5 +211,6 @@ export function setupBot(overrides: Partial<QaResponderDeps> = {}): void {
   }
   registerJobHandler('qa_answer', createQaJobHandler(deps), {
     onFailure: buildQaFailureNotifier(deps),
+    shouldRetry: isTransientAiError,
   })
 }

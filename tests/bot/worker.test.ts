@@ -51,6 +51,34 @@ describe('worker', () => {
     expect(failures.length).toBe(1)
   })
 
+  it('fails at once, without a retry, when shouldRetry rejects the error', async () => {
+    let calls = 0
+    const failures: string[] = []
+    registerJobHandler('qa_answer', async () => { calls++; throw new Error('permanent') }, {
+      shouldRetry: () => false,
+      onFailure: async (_job, error) => { failures.push(error) },
+    })
+    const id = insertJob({ jobType: 'qa_answer', messageId: 'M1', runAt: NOW() })!
+    await runWorkerPass()
+    expect(calls).toBe(1)
+    expect(getJob(id)!.status).toBe('failed')
+    expect(getJob(id)!.attempts).toBe(1)
+    expect(failures.length).toBe(1)
+  })
+
+  it('hands the thrown error to shouldRetry and retries when it agrees', async () => {
+    let calls = 0
+    const asked: string[] = []
+    registerJobHandler('qa_answer', async () => { calls++; throw new Error(`busy ${calls}`) }, {
+      shouldRetry: (err) => { asked.push((err as Error).message); return true },
+    })
+    const id = insertJob({ jobType: 'qa_answer', messageId: 'M1', runAt: NOW() })!
+    await runWorkerPass()
+    expect(calls).toBe(2)
+    expect(asked).toEqual(['busy 1']) // not asked after the last attempt
+    expect(getJob(id)!.status).toBe('failed')
+  })
+
   it('succeeds on the retry after one failure', async () => {
     let calls = 0
     registerJobHandler('qa_answer', async () => {
@@ -102,18 +130,18 @@ describe('worker', () => {
     expect(getJob(id)!.status).toBe('done')
   })
 
-  it('fails a hung handler via the watchdog and keeps working', async () => {
+  it('fails a hung handler via the watchdog without a retry, even when shouldRetry agrees', async () => {
     vi.useFakeTimers()
     try {
-      registerJobHandler('qa_answer', () => new Promise(() => { /* never settles */ }))
+      registerJobHandler('qa_answer', () => new Promise(() => { /* never settles */ }), { shouldRetry: () => true })
       const id = insertJob({ jobType: 'qa_answer', messageId: 'M1', runAt: NOW() })!
       const pass = runWorkerPass()
-      await vi.advanceTimersByTimeAsync(120_000) // attempt 1 times out → retry
-      await vi.advanceTimersByTimeAsync(120_000) // attempt 2 times out → failed
+      // the hung attempt is still running, so a retry could reply twice
+      await vi.advanceTimersByTimeAsync(120_000) // attempt 1 times out → failed, no retry
       await pass
       expect(getJob(id)!.status).toBe('failed')
       expect(getJob(id)!.error).toMatch(/timed out/i)
-      expect(getJob(id)!.attempts).toBe(2)
+      expect(getJob(id)!.attempts).toBe(1)
     } finally {
       vi.useRealTimers()
     }

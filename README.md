@@ -84,8 +84,9 @@ data tools, and `@bot !tool <name> <json-args>` runs one and echoes its raw resu
 A question is answered by a **function-calling loop** against Google's Gemini API
 (`@google/genai`): the model receives the system prompt, the recent conversation of
 the group the question was asked in, and the question, then decides which data tools
-to call, reads their results, and writes the final answer (up to 6 tool rounds, 60 s
-budget per job). The tools are read-only queries over this monitor's own database:
+to call, reads their results, and writes the final answer (up to 8 rounds within a
+60 s budget; the last round has tools switched off, so there is always an answer).
+The tools are read-only queries over this monitor's own database:
 
 | Tool | Returns |
 |------|---------|

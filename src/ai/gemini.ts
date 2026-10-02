@@ -1,5 +1,5 @@
-import { GoogleGenAI } from '@google/genai'
-import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider, type AiResponse, type AiToolDef } from './provider.js'
+import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai'
+import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider, type AiRequest, type AiResponse, type AiToolDef } from './provider.js'
 
 interface GeminiContent {
   role: 'user' | 'model'
@@ -61,6 +61,23 @@ export function toGeminiTools(tools: AiToolDef[]): GeminiTool[] | undefined {
   }]
 }
 
+export interface GeminiConfig {
+  systemInstruction: string
+  tools?: GeminiTool[]
+  toolConfig?: { functionCallingConfig: { mode: FunctionCallingConfigMode } }
+}
+
+export function toGeminiConfig(req: AiRequest): GeminiConfig {
+  const tools = toGeminiTools(req.tools)
+  return {
+    systemInstruction: req.system,
+    ...(tools ? { tools } : {}),
+    ...(tools && req.allowToolCalls === false
+      ? { toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } }
+      : {}),
+  }
+}
+
 export function fromGeminiResponse(resp: GeminiResponseShape): AiResponse {
   const toolCalls = (resp.functionCalls ?? [])
     .filter(fc => !!fc.name)
@@ -82,11 +99,7 @@ export function createGeminiProvider(opts: { apiKey: string; model: string }): A
       const response = await ai.models.generateContent({
         model: opts.model,
         contents: toGeminiContents(req.messages),
-        config: {
-          systemInstruction: req.system,
-          abortSignal: AbortSignal.timeout(AI_CALL_TIMEOUT_MS),
-          ...(req.tools.length ? { tools: toGeminiTools(req.tools) } : {}),
-        },
+        config: { ...toGeminiConfig(req), abortSignal: AbortSignal.timeout(AI_CALL_TIMEOUT_MS) },
       })
       // Read functionCalls first: the .text getter warns to the console when
       // the response mixes text and functionCall parts.

@@ -1,5 +1,5 @@
 import type { BotJob } from '../db/schema.js'
-import type { AiChatMessage, AiProvider } from '../ai/provider.js'
+import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider } from '../ai/provider.js'
 import { getAiSettings, expandPlaceholders, type AiSettings } from '../ai/settings.js'
 import { loadToolDeclarations } from '../ai/tools/loader.js'
 import { executeQaTool } from '../ai/tools/executors.js'
@@ -12,8 +12,14 @@ import { formatDateTime } from '../utils/time.js'
 import type { JobHandler } from './worker.js'
 import { logger } from '../utils/logger.js'
 
-export const QA_MAX_ROUNDS = 6
+export const QA_MAX_ROUNDS = 8
+/** Time budget for the tool rounds. Not a hard stop: when it runs low, the
+ *  next round is the last one, and that round may run past it. */
 export const QA_JOB_TIMEOUT_MS = 60_000
+/** With less time than this left, the next round is the last one. Equal to
+ *  one AI call's timeout, so every tool round ends within the budget and the
+ *  whole job stays well inside the worker's watchdog. */
+export const QA_FINAL_ROUND_RESERVE_MS = AI_CALL_TIMEOUT_MS
 export const QA_CONTEXT_MESSAGES = 20
 export const QA_CONTEXT_MAX_AGE_MS = 48 * 3600_000
 export const QA_THREAD_MAX_DEPTH = 10
@@ -27,6 +33,10 @@ export interface QaResponderDeps {
   setComposing?: (groupJid: string) => Promise<void>
   nowMs?: () => number // injectable clock for tests
 }
+
+/** Appended to the system prompt on the last round, when tool calls are off. */
+const FINAL_ROUND_NOTE = 'Tool calls are switched off now: this is your last turn. '
+  + 'Answer the question using only what you have already found. If something is still missing, say briefly what.'
 
 let lastLimitNoticeAt = 0
 
@@ -78,11 +88,16 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
     let answer: string | null = null
 
     for (let round = 1; round <= QA_MAX_ROUNDS; round++) {
-      if (now() > deadline) throw new Error('Q&A job timed out')
       if (round > 1) await checkDailyLimit(job, deps, settings.dailyLimit, now)
+      // the last round always ends in an answer: tools off, the model must reply
+      const toolsOff = round === QA_MAX_ROUNDS ? 'last round'
+        : deadline - now() < QA_FINAL_ROUND_RESERVE_MS ? 'time almost up'
+        : null
 
       const started = now()
-      const resp = await provider.generate({ system, messages, tools })
+      const resp = await provider.generate(toolsOff
+        ? { system: `${system}\n\n${FINAL_ROUND_NOTE}`, messages, tools, allowToolCalls: false }
+        : { system, messages, tools })
       addJobAiUsage(job.id, { calls: 1, tokensIn: resp.usage.tokensIn, tokensOut: resp.usage.tokensOut })
       addJobEvent(job.id, 'ai_call', {
         groupJid: job.groupJid,
@@ -90,6 +105,7 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
           round,
           model: settings.model,
           durationMs: now() - started,
+          ...(toolsOff ? { toolsOff } : {}),
           tokensIn: resp.usage.tokensIn,
           tokensOut: resp.usage.tokensOut,
           request: round === 1
@@ -101,7 +117,7 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
         },
       })
 
-      if (resp.toolCalls?.length) {
+      if (resp.toolCalls?.length && !toolsOff) {
         messages.push({ role: 'assistant', text: resp.text, toolCalls: resp.toolCalls, raw: resp.raw })
         for (const call of resp.toolCalls) {
           const executed = executeQaTool(call.name, call.args, { scope, timezone: settings.timezone, nowMs: now })
@@ -120,12 +136,14 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
       }
 
       const text = resp.text?.trim()
+      if (!text && toolsOff && resp.toolCalls?.length) throw new Error('AI asked for tools after they were switched off')
       if (!text) throw new Error('AI returned an empty response')
       answer = text
       break
     }
 
-    if (!answer) throw new Error(`No answer after ${QA_MAX_ROUNDS} tool rounds`)
+    // unreachable: the last round either answers or throws
+    if (!answer) throw new Error('No answer from the AI')
     if (answer.length > QA_ANSWER_MAX_CHARS) {
       answer = answer.slice(0, QA_ANSWER_MAX_CHARS) + '\n… _(truncated — ask me to narrow it down)_'
     }
@@ -139,13 +157,32 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
   }
 }
 
+/** The AI service says it is overloaded or out of quota. The SDK's error
+ *  message is the JSON error body, so a 429 shows as "code":429 — a bare
+ *  number would also match e.g. a daily limit of 429. */
+const AI_BUSY_RE = /"code":\s*429\b|too many requests|quota|rate.?limit|resource.?exhausted|overloaded|unavailable/i
+/** The request never got a proper answer: network failure, timeout, or the
+ *  WhatsApp connection dropped (Baileys errors) while sending the reply. */
+const NETWORK_RE = /fetch failed|network|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|timed out|timeout|abort|Connection (Closed|Terminated|was lost)/i
+
+/** Worker retry policy: only errors that another attempt can fix. Anything
+ *  else (a bad request, an empty answer, the daily limit) would fail the same
+ *  way again and only cost more. */
+export function isTransientAiError(err: unknown): boolean {
+  const status = (err as { status?: unknown })?.status
+  if (typeof status === 'number') return status === 429 || status >= 500
+  const text = err instanceof Error ? `${err.name} ${err.message}` : String(err)
+  return AI_BUSY_RE.test(text) || NETWORK_RE.test(text)
+}
+
 /** onFailure notifier for the worker: short apology, never internals. Stays
  *  silent when the group already got a message for this job (a limit notice,
  *  or the answer itself before a late crash). */
 export function buildQaFailureNotifier(deps: Pick<QaResponderDeps, 'sendReply'>) {
   return async function notifyQaFailure(job: BotJob, error: string): Promise<void> {
     if (hasJobEvent(job.id, 'reply_sent') || hasJobEvent(job.id, 'limit_notice')) return
-    const busy = /429|quota|rate.?limit|resource.?exhausted|overloaded|unavailable/i.test(error)
+    // skip stack frames: a line number like ":429:" is not a rate limit
+    const busy = AI_BUSY_RE.test(error.split('\n').filter(l => !/^\s+at /.test(l)).join('\n'))
     const text = busy
       ? '⚠️ I could not answer — the AI service is busy right now. Please try again in a minute.'
       : '⚠️ Sorry, I could not process that question. The details are in the admin panel job log.'
@@ -191,6 +228,9 @@ function buildSystemPrompt(scope: QaScope, nowMs: number, settings: AiSettings, 
   lines.push(expandPlaceholders(settings.systemPrompt, values))
   lines.push('')
   lines.push(`Current date and time: ${formatDateTime(new Date(nowMs), settings.timezone)} (${settings.timezone}).`)
+  // the last round has tools off, so one fewer round can call them
+  lines.push(`You can call tools in up to ${QA_MAX_ROUNDS - 1} rounds, then you must answer. `
+    + 'In one round you can call several tools at once: do that whenever the calls do not depend on each other.')
   lines.push('Groups you can report on:')
   // each concrete group carries the date its data starts — before it, nothing
   // is recorded (communities are containers, their children carry the dates)
