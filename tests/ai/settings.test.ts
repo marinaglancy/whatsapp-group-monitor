@@ -55,7 +55,8 @@ describe('getAiSettings', () => {
   })
 
   it('tells the model that empty results are answers and monitoring has a start date', () => {
-    expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/empty result is an answer/i)
+    expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/finds nothing, that is the answer/i)
+    expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/do not retry/i)
     expect(DEFAULT_QA_SYSTEM_PROMPT).toMatch(/monitor(ed|ing) only (from|since)/i)
   })
 
