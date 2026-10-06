@@ -1,43 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import Database from 'better-sqlite3'
 import { join } from 'path'
 import { setupTestDbs, TEST_PHONE } from '../helpers/db.js'
 import { seedGroup } from '../helpers/fixtures.js'
 import { getGroup } from '../../src/db/queries/groups.js'
 import { mergeAccountDb } from '../../src/web/routes/backup.js'
-
-// groups schema as it was BEFORE the bot_config upgrade (real pre-upgrade backups)
-const OLD_GROUPS_DDL = `CREATE TABLE groups (
-  jid TEXT PRIMARY KEY, name TEXT NOT NULL, is_community INTEGER NOT NULL DEFAULT 0,
-  parent_community_jid TEXT, permissions TEXT, bot_membership TEXT NOT NULL DEFAULT 'none',
-  bot_functions INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`
-
-const NEW_GROUPS_DDL = OLD_GROUPS_DDL.replace(
-  'created_at INTEGER NOT NULL)',
-  'created_at INTEGER NOT NULL, bot_config TEXT)',
-)
-
-// the other tables the merge touches, current shape
-const SUPPORT_DDL = `
-CREATE TABLE users (jid TEXT PRIMARY KEY, phone_number TEXT, is_banned INTEGER NOT NULL DEFAULT 0,
-  display_name TEXT, display_name_updated_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-CREATE TABLE group_members (group_jid TEXT NOT NULL, user_jid TEXT NOT NULL, membership TEXT NOT NULL DEFAULT 'participant',
-  joined_at INTEGER, left_at INTEGER, updated_at INTEGER NOT NULL, last_read_at TEXT, PRIMARY KEY (group_jid, user_jid));
-CREATE TABLE group_activity_log (id INTEGER PRIMARY KEY AUTOINCREMENT, group_jid TEXT NOT NULL, user_jid TEXT NOT NULL,
-  message_id TEXT NOT NULL, parent_id TEXT, event_type TEXT NOT NULL, metadata TEXT, raw TEXT, timestamp INTEGER NOT NULL, created_at INTEGER NOT NULL);
-`
+import { makeBackupDb, OLD_GROUPS_DDL, NEW_GROUPS_DDL } from '../helpers/backup.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
 beforeEach(() => { dbs = setupTestDbs() })
 afterEach(() => { dbs.cleanup() })
-
-function makeBackupDb(path: string, groupsDdl: string, inserts: string): void {
-  const db = new Database(path)
-  db.exec(groupsDdl)
-  db.exec(SUPPORT_DDL)
-  db.exec(inserts)
-  db.close()
-}
 
 describe('mergeAccountDb groups schema drift', () => {
   it('merges a pre-upgrade backup (no bot_config column) into a migrated live db', () => {
