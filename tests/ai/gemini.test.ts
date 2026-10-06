@@ -75,14 +75,11 @@ describe('toGeminiConfig', () => {
     const c = toGeminiConfig({ system: 'SYS', messages: [], tools: [tool] })
     expect(c.systemInstruction).toBe('SYS')
     expect(c.tools?.[0].functionDeclarations).toHaveLength(1)
-    expect(c.toolConfig).toBeUndefined()
   })
 
-  it('keeps the tools declared but forbids calling them when tool calls are off', () => {
-    // the history still holds earlier function calls, which need their declarations
-    const c = toGeminiConfig({ system: 'SYS', messages: [], tools: [tool], allowToolCalls: false })
-    expect(c.tools?.[0].functionDeclarations).toHaveLength(1)
-    expect(c.toolConfig).toEqual({ functionCallingConfig: { mode: 'NONE' } })
+  it('leaves tools out entirely when none are given (the last round)', () => {
+    const c = toGeminiConfig({ system: 'SYS', messages: [], tools: [] })
+    expect(c).toEqual({ systemInstruction: 'SYS' })
   })
 })
 

@@ -1,5 +1,5 @@
 import type { BotJob } from '../db/schema.js'
-import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider } from '../ai/provider.js'
+import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider, type AiToolCall } from '../ai/provider.js'
 import { getAiSettings, expandPlaceholders, type AiSettings } from '../ai/settings.js'
 import { loadToolDeclarations } from '../ai/tools/loader.js'
 import { executeQaTool } from '../ai/tools/executors.js'
@@ -34,9 +34,11 @@ export interface QaResponderDeps {
   nowMs?: () => number // injectable clock for tests
 }
 
-/** Appended to the system prompt on the last round, when tool calls are off. */
-const FINAL_ROUND_NOTE = 'Tool calls are switched off now: this is your last turn. '
-  + 'Answer the question using only what you have already found. If something is still missing, say briefly what.'
+/** Ends the last round's question: no tools are sent, so the model must answer. */
+const FINAL_ROUND_NOTE = 'You cannot call tools any more. Answer the question now, using only the results above. '
+  + 'If something is still missing, say briefly what.'
+/** Sent to the group when even the last round gives no answer. */
+const NO_ANSWER_REPLY = '⚠️ I could not find an answer this time. Please try a narrower question.'
 
 let lastLimitNoticeAt = 0
 
@@ -89,14 +91,14 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
 
     for (let round = 1; round <= QA_MAX_ROUNDS; round++) {
       if (round > 1) await checkDailyLimit(job, deps, settings.dailyLimit, now)
-      // the last round always ends in an answer: tools off, the model must reply
+      // the last round sends no tools, so the model has to reply in text
       const toolsOff = round === QA_MAX_ROUNDS ? 'last round'
         : deadline - now() < QA_FINAL_ROUND_RESERVE_MS ? 'time almost up'
         : null
 
       const started = now()
       const resp = await provider.generate(toolsOff
-        ? { system: `${system}\n\n${FINAL_ROUND_NOTE}`, messages, tools, allowToolCalls: false }
+        ? { system, messages: buildFinalRoundMessages(messages, historyTurns), tools: [] }
         : { system, messages, tools })
       addJobAiUsage(job.id, { calls: 1, tokensIn: resp.usage.tokensIn, tokensOut: resp.usage.tokensOut })
       addJobEvent(job.id, 'ai_call', {
@@ -110,7 +112,7 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
           tokensOut: resp.usage.tokensOut,
           request: round === 1
             ? { system, question, contextChars, historyTurns, toolNames: tools.map(t => t.name) }
-            : { toolResults: 'see tool_call events' },
+            : { toolResults: toolsOff ? 'given as text in the question, no tools sent' : 'see tool_call events' },
           response: resp.toolCalls?.length
             ? { toolCalls: resp.toolCalls }
             : { text: (resp.text ?? '').slice(0, 4_000) },
@@ -136,7 +138,17 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
       }
 
       const text = resp.text?.trim()
-      if (!text && toolsOff && resp.toolCalls?.length) throw new Error('AI asked for tools after they were switched off')
+      if (!text && toolsOff) {
+        // no chance left: tell the group honestly rather than a generic apology
+        // (the failure notifier stays silent once reply_sent is recorded)
+        const why = resp.toolCalls?.length ? 'the AI still asked for tools' : 'the AI returned no text'
+        const sentId = await deps.sendReply(job, NO_ANSWER_REPLY)
+        addJobEvent(job.id, 'reply_sent', {
+          groupJid: job.groupJid, userJid: job.userJid, messageId: sentId,
+          data: { chars: NO_ANSWER_REPLY.length, fallback: true },
+        })
+        throw new Error(`No answer on the last round: ${why}`)
+      }
       if (!text) throw new Error('AI returned an empty response')
       answer = text
       break
@@ -155,6 +167,28 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
     })
     return { replyMessageId: sentId, answerChars: answer.length }
   }
+}
+
+/** The last round's conversation. Gemini keeps calling tools, even made-up
+ *  ones, when the history is full of tool calls, so those calls and their
+ *  results are folded into the question as plain text. */
+export function buildFinalRoundMessages(messages: AiChatMessage[], historyTurns: number): AiChatMessage[] {
+  const first = messages[historyTurns] as Extract<AiChatMessage, { role: 'user' }>
+  const results: string[] = []
+  let calls: AiToolCall[] = []
+  for (const m of messages.slice(historyTurns + 1)) {
+    if (m.role === 'assistant') {
+      calls = [...(m.toolCalls ?? [])]
+    } else if (m.role === 'tool') {
+      // results follow their calls in order
+      const call = calls.shift()
+      results.push(`${results.length + 1}. ${m.name} ${JSON.stringify(call?.args ?? {})}\n${m.result}`)
+    }
+  }
+  const parts = [first.text]
+  if (results.length) parts.push('You already called tools for this question. Their results:', results.join('\n\n'))
+  parts.push(FINAL_ROUND_NOTE)
+  return [...messages.slice(0, historyTurns), { role: 'user', text: parts.join('\n\n') }]
 }
 
 /** The AI service says it is overloaded or out of quota. The SDK's error

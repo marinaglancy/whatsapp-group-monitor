@@ -110,6 +110,18 @@ describe('qa flow end-to-end (AI responder)', () => {
     expect(calls()).toBe(2)
   })
 
+  it('sends only the honest no-answer reply when the last round fails, without a retry', async () => {
+    const { QA_MAX_ROUNDS } = await import('../../src/bot/responder.js')
+    provider = fakeProvider(Array.from({ length: QA_MAX_ROUNDS }, () => ({ toolCalls: [{ name: 'group_list', args: {} }] })))
+    ActivityRecord.fromMessage(incoming('@bot how active was Alpha?', 'INCOMING1'), 'qa@g.us')!.saveAndProcess()
+    await runWorkerPass()
+    const job = listJobs({ limit: 10, offset: 0 }).jobs[0]
+    expect(job.status).toBe('failed')
+    expect(job.attempts).toBe(1)
+    expect(job.error).toMatch(/no answer on the last round/i)
+    expect(sent.map(s => s.text)).toEqual([expect.stringMatching(/narrower question/i)]) // no apology on top
+  })
+
   it('threads a follow-up reply through the ancestor exchange', async () => {
     ActivityRecord.fromMessage(incoming('@bot how active was Alpha?', 'INCOMING1'), 'qa@g.us')!.saveAndProcess()
     await runWorkerPass()

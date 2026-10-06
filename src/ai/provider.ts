@@ -40,9 +40,6 @@ export interface AiRequest {
   system: string
   messages: AiChatMessage[]
   tools: AiToolDef[]
-  /** false = the model must answer in text. The tools stay declared, because
-   *  the history may still hold earlier calls to them. Default true. */
-  allowToolCalls?: boolean
 }
 
 export interface AiProvider {

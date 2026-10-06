@@ -1,4 +1,4 @@
-import { FunctionCallingConfigMode, GoogleGenAI } from '@google/genai'
+import { GoogleGenAI } from '@google/genai'
 import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider, type AiRequest, type AiResponse, type AiToolDef } from './provider.js'
 
 interface GeminiContent {
@@ -64,18 +64,11 @@ export function toGeminiTools(tools: AiToolDef[]): GeminiTool[] | undefined {
 export interface GeminiConfig {
   systemInstruction: string
   tools?: GeminiTool[]
-  toolConfig?: { functionCallingConfig: { mode: FunctionCallingConfigMode } }
 }
 
 export function toGeminiConfig(req: AiRequest): GeminiConfig {
   const tools = toGeminiTools(req.tools)
-  return {
-    systemInstruction: req.system,
-    ...(tools ? { tools } : {}),
-    ...(tools && req.allowToolCalls === false
-      ? { toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.NONE } } }
-      : {}),
-  }
+  return { systemInstruction: req.system, ...(tools ? { tools } : {}) }
 }
 
 export function fromGeminiResponse(resp: GeminiResponseShape): AiResponse {

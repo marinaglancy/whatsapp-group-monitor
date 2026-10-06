@@ -7,7 +7,7 @@ import { updateGroupQaConfig } from '../../src/db/queries/groups.js'
 import { setSetting } from '../../src/db/queries/settings.js'
 import { insertJob, getJob, getJobEvents, addJobEvent, addJobAiUsage } from '../../src/db/queries/jobs.js'
 import {
-  createQaAnswerHandler, buildQaFailureNotifier, resetLimitNoticeForTests, isTransientAiError,
+  createQaAnswerHandler, buildQaFailureNotifier, resetLimitNoticeForTests, isTransientAiError, buildFinalRoundMessages,
   QA_MAX_ROUNDS, QA_ANSWER_MAX_CHARS, QA_THREAD_MAX_DEPTH,
 } from '../../src/bot/responder.js'
 import type { AiProvider } from '../../src/ai/provider.js'
@@ -294,32 +294,52 @@ describe('qa_answer handler', () => {
 
   const toolRound = () => ({ toolCalls: [{ name: 'group_list', args: {} }] })
 
-  it('switches tool calls off on the last round, so the model has to answer', async () => {
+  const hasTools = (c: { tools: unknown[] }) => c.tools.length > 0
+
+  it('sends no tools on the last round, so the model has to answer', async () => {
     const provider = fakeProvider([
       ...Array.from({ length: QA_MAX_ROUNDS - 1 }, toolRound),
       { text: 'Here is what I found so far.' },
     ])
     await makeHandler(provider)(makeJob())
-    expect(provider.calls.map(c => c.allowToolCalls)).toEqual([...Array(QA_MAX_ROUNDS - 1).fill(true), false])
+    expect(provider.calls.map(hasTools)).toEqual([...Array(QA_MAX_ROUNDS - 1).fill(true), false])
     expect(sent[0].text).toBe('Here is what I found so far.')
   })
 
-  it('adds a note to the instructions on the last round only', async () => {
-    const provider = fakeProvider([...Array.from({ length: QA_MAX_ROUNDS - 1 }, toolRound), { text: 'ok' }])
+  it('gives the last round the tool results as plain text, with no tool calls left in the conversation', async () => {
+    const provider = fakeProvider([
+      { toolCalls: [{ name: 'group_list', args: { limit: 5 } }] },
+      ...Array.from({ length: QA_MAX_ROUNDS - 2 }, toolRound),
+      { text: 'ok' },
+    ])
     await makeHandler(provider)(makeJob())
-    const normal = provider.calls[0].system
-    expect(provider.calls.slice(0, -1).every(c => c.system === normal)).toBe(true)
-    const last = provider.calls.at(-1)!.system
-    expect(last.startsWith(normal)).toBe(true)
-    expect(last.length).toBeGreaterThan(normal.length)
+    const firstTurn = (provider.calls[0].messages.at(-1) as { text: string }).text
+    const last = provider.calls.at(-1)!
+    // a conversation full of tool calls is what made Gemini keep calling tools
+    expect(last.messages.some(m => m.role === 'tool' || (m.role === 'assistant' && m.toolCalls?.length))).toBe(false)
+    const final = last.messages.at(-1) as { role: string; text: string }
+    expect(final.role).toBe('user')
+    expect(final.text.startsWith(firstTurn)).toBe(true)
+    expect(final.text).toContain('group_list {"limit":5}') // which call
+    expect(final.text).toContain('Alpha') // and what it returned
   })
 
-  it('never runs tools on the last round, even if the model still asks for them', async () => {
+  it('replies honestly instead of failing when the last round still gives no answer', async () => {
     const provider = fakeProvider(Array.from({ length: QA_MAX_ROUNDS }, toolRound))
     const job = makeJob()
-    await expect(makeHandler(provider)(job)).rejects.toThrow(/switched off/i)
-    expect(provider.calls.length).toBe(QA_MAX_ROUNDS)
+    await expect(makeHandler(provider)(job)).rejects.toThrow(/no answer on the last round/i)
+    expect(sent.map(m => m.text)).toEqual([expect.stringMatching(/narrower question/i)])
     expect(getJobEvents(job.id).filter(e => e.eventType === 'tool_call').length).toBe(QA_MAX_ROUNDS - 1)
+    const replied = getJobEvents(job.id).find(e => e.eventType === 'reply_sent')!
+    expect(replied.data).toMatchObject({ fallback: true })
+  })
+
+  it('also replies honestly when the last round comes back empty', async () => {
+    const provider = fakeProvider([...Array.from({ length: QA_MAX_ROUNDS - 1 }, toolRound), {}])
+    const job = makeJob()
+    await expect(makeHandler(provider)(job)).rejects.toThrow(/no answer on the last round/i)
+    expect(sent.map(m => m.text)).toEqual([expect.stringMatching(/narrower question/i)])
+    expect(getJobEvents(job.id).find(e => e.eventType === 'reply_sent')!.data).toMatchObject({ fallback: true })
   })
 
   it('logs on the job why tools were off', async () => {
@@ -350,7 +370,7 @@ describe('qa_answer handler', () => {
     const provider = slowProvider([toolRound(), { text: 'Answer under time pressure.' }], 50_000, clock)
     const job = makeJob()
     await makeHandler(provider, () => clock.t)(job)
-    expect(provider.calls.map(c => c.allowToolCalls)).toEqual([true, false])
+    expect(provider.calls.map(hasTools)).toEqual([true, false])
     expect(sent[0].text).toBe('Answer under time pressure.')
     expect(getJobEvents(job.id).filter(e => e.eventType === 'ai_call').at(-1)!.data!.toolsOff).toBe('time almost up')
   })
@@ -359,7 +379,7 @@ describe('qa_answer handler', () => {
     const clock = { t: NOW_MS }
     const provider = slowProvider([toolRound(), toolRound(), { text: 'done' }], 10_000, clock)
     await makeHandler(provider, () => clock.t)(makeJob())
-    expect(provider.calls.map(c => c.allowToolCalls)).toEqual([true, true, true])
+    expect(provider.calls.map(hasTools)).toEqual([true, true, true])
   })
 
   it('truncates over-long answers with a hint', async () => {
@@ -439,5 +459,32 @@ describe('isTransientAiError', () => {
     ['code bug', false, new TypeError("Cannot read properties of undefined (reading 'x')")],
   ])('%s → retry: %s', (_label, want, err) => {
     expect(isTransientAiError(err)).toBe(want)
+  })
+})
+
+describe('buildFinalRoundMessages', () => {
+  it('keeps the earlier exchange and folds each call, with its own result, into the question', () => {
+    const final = buildFinalRoundMessages([
+      { role: 'user', text: 'earlier question' },        // thread history
+      { role: 'assistant', text: 'earlier answer' },
+      { role: 'user', text: 'THE QUESTION' },            // this job's question
+      { role: 'assistant', toolCalls: [{ name: 'a', args: { x: 1 } }, { name: 'b', args: { y: 2 } }] }, // two calls in one round
+      { role: 'tool', name: 'a', result: 'RESULT-A' },
+      { role: 'tool', name: 'b', result: 'RESULT-B' },
+      { role: 'assistant', toolCalls: [{ name: 'c', args: {} }] },
+      { role: 'tool', name: 'c', result: 'RESULT-C' },
+    ], 2)
+
+    expect(final.slice(0, 2)).toEqual([
+      { role: 'user', text: 'earlier question' },
+      { role: 'assistant', text: 'earlier answer' },
+    ])
+    expect(final).toHaveLength(3)
+    const last = final[2] as { role: string; text: string }
+    expect(last.role).toBe('user')
+    expect(last.text.startsWith('THE QUESTION')).toBe(true)
+    const order = ['1. a {"x":1}\nRESULT-A', '2. b {"y":2}\nRESULT-B', '3. c {}\nRESULT-C'].map(p => last.text.indexOf(p))
+    expect(order.every(i => i > 0)).toBe(true)
+    expect([...order].sort((p, q) => p - q)).toEqual(order)
   })
 })
