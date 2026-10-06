@@ -4,6 +4,7 @@ import { isAccountDbReady } from '../../db/account.js'
 import { updateDisplayName } from '../../db/queries/users.js'
 import { cacheMessage } from '../client.js'
 import { ActivityRecord } from '../activity/record.js'
+import { trackDecryption, takeLostMessages, LOST_AFTER_MS } from '../activity/undecryptable.js'
 
 export function handleMessagesUpsert(event: BaileysEventMap['messages.upsert']) {
   if (!isAccountDbReady()) return
@@ -13,6 +14,7 @@ export function handleMessagesUpsert(event: BaileysEventMap['messages.upsert']) 
   for (const msg of messages) {
     const groupJid = msg.key.remoteJid
     if (!groupJid || !groupJid.endsWith('@g.us')) continue
+    trackDecryption(msg, groupJid, Date.now())
 
     // Cache messages that have messageSecret (polls, events) for later decryption
     if (msg.message?.messageContextInfo?.messageSecret) {
@@ -29,5 +31,11 @@ export function handleMessagesUpsert(event: BaileysEventMap['messages.upsert']) 
     record.saveAndProcess()
 
     logger.debug({ groupJid, messageId: record.messageId, eventType: record.eventType }, 'Activity logged')
+  }
+
+  for (const lost of takeLostMessages(Date.now())) {
+    const { firstSeenMs, ...where } = lost
+    logger.warn({ ...where, firstSeen: new Date(firstSeenMs).toISOString() },
+      `Message lost: could not be decrypted and was not re-sent within ${LOST_AFTER_MS / 60_000} minutes`)
   }
 }
