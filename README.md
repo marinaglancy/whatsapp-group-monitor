@@ -28,6 +28,8 @@ Once deployed, navigate to the service Settings page on Railway and copy the URL
 ```bash
 cp .env.example .env
 # Edit .env: set ADMIN_PASSWORD
+cp docker-compose.example.yml docker-compose.yml
+# Edit docker-compose.yml if needed (e.g. the port)
 docker compose up --build
 ```
 
