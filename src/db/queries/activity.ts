@@ -76,6 +76,32 @@ export function getGroupLastActivity(groupJids: string[]): Map<string, number> {
   return result
 }
 
+/** Oldest activity timestamp in a group, or null when nothing is recorded */
+export function getGroupFirstActivity(groupJid: string): number | null {
+  const db = getAccountDb()
+  const row = db.select({ firstTs: sql<number | null>`min(timestamp)` })
+    .from(groupActivityLog)
+    .where(eq(groupActivityLog.groupJid, groupJid))
+    .get()
+  return row?.firstTs ?? null
+}
+
+/** Whether a reaction by this person to this message is recorded at or after the given time */
+export function hasReactionSince(groupJid: string, targetMsgId: string, userJid: string, since: number): boolean {
+  const db = getAccountDb()
+  const row = db.select({ id: groupActivityLog.id })
+    .from(groupActivityLog)
+    .where(and(
+      eq(groupActivityLog.groupJid, groupJid),
+      eq(groupActivityLog.parentId, targetMsgId),
+      eq(groupActivityLog.userJid, userJid),
+      eq(groupActivityLog.eventType, 'reaction'),
+      gte(groupActivityLog.timestamp, since),
+    ))
+    .get()
+  return row !== undefined
+}
+
 /** Per-group activity breakdown for a user in the last N days */
 export function getUserActivityPerGroup(userJid: string, sinceDays: number) {
   const db = getAccountDb()

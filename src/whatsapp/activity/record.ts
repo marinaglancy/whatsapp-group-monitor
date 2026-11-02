@@ -46,6 +46,30 @@ function extractQuotedId(message: proto.IMessage): string | null {
   return (content as { contextInfo?: { stanzaId?: string } } | undefined)?.contextInfo?.stanzaId || null
 }
 
+/** Map chosen poll options (sha256 hashes of option names) back to the names; unknown hashes stay as hex */
+function pollOptionNames(hashes: Uint8Array[], options: string[]): string[] {
+  const names = new Map(options.map(o => [createHash('sha256').update(o).digest('hex'), o]))
+  return hashes.map(hash => {
+    const hex = Buffer.from(hash).toString('hex')
+    return names.get(hex) || hex
+  })
+}
+
+/** Event RSVP answer as stored: GOING, NOT_GOING or MAYBE; anything else as its number, or UNKNOWN */
+function eventResponseName(response: number | null | undefined): string {
+  return response === 1 ? 'GOING' : response === 2 ? 'NOT_GOING' : response === 3 ? 'MAYBE' : String(response ?? 'UNKNOWN')
+}
+
+/** The bot account's own id: its lid when known, 'self' when there is no connection */
+export function ownJid(): string | null {
+  try {
+    const sock = getSock()
+    return jidNormalizedUser(sock.user?.lid || sock.user?.id || '') || null
+  } catch {
+    return 'self'
+  }
+}
+
 export class ActivityRecord {
   groupJid: string
   userJid: string
@@ -129,12 +153,7 @@ export class ActivityRecord {
     if (participant) {
       userJid = jidNormalizedUser(participant)
     } else if (msg.key.fromMe) {
-      try {
-        const sock = getSock()
-        userJid = jidNormalizedUser(sock.user?.lid || sock.user?.id || '')
-      } catch {
-        userJid = 'self'
-      }
+      userJid = ownJid()
     }
     if (!userJid) return null
 
@@ -220,15 +239,7 @@ export class ActivityRecord {
               voterJid,
             })
 
-            const optionHashes = new Map<string, string>()
-            for (const optName of ctx.options || []) {
-              const hash = createHash('sha256').update(optName).digest('hex')
-              optionHashes.set(hash, optName)
-            }
-            selectedOptions = (result.selectedOptions || []).map(hash => {
-              const hex = Buffer.from(hash).toString('hex')
-              return optionHashes.get(hex) || hex
-            })
+            selectedOptions = pollOptionNames(result.selectedOptions || [], ctx.options || [])
             decrypted = true
           }
         } catch (err) {
@@ -306,8 +317,7 @@ export class ActivityRecord {
               eventMsgId,
               responderJid,
             })
-            const r = decoded.response
-            responseStr = r === 1 ? 'GOING' : r === 2 ? 'NOT_GOING' : r === 3 ? 'MAYBE' : String(r ?? 'UNKNOWN')
+            responseStr = eventResponseName(decoded.response)
           }
         } catch (err) {
           logger.warn({ err, groupJid, messageId, eventMsgId }, 'Event response decryption failed')
@@ -386,6 +396,53 @@ export class ActivityRecord {
       eventType: 'reaction',
       metadata: { emoji: reaction.text || null },
       timestamp: Math.floor(Date.now() / 1000),
+    })
+  }
+
+  /** Create a reaction ActivityRecord from history sync, where each reaction
+   *  has its own message ID and the time it was sent. */
+  static fromHistoryReaction(groupJid: string, targetMsgId: string, reaction: proto.IReaction, userJid: string): ActivityRecord | null {
+    const messageId = reaction.key?.id
+    const timestamp = Math.floor(Number(reaction.senderTimestampMs || 0) / 1000)
+    if (!messageId || !timestamp) return null
+
+    return new ActivityRecord({
+      groupJid, userJid, messageId, timestamp,
+      parentId: targetMsgId,
+      eventType: 'reaction',
+      metadata: { emoji: reaction.text || null },
+    })
+  }
+
+  /** Create a poll vote ActivityRecord from history sync. History votes come
+   *  already decrypted, under the same message ID as the live vote. */
+  static fromHistoryVote(groupJid: string, pollMsgId: string, update: proto.IPollUpdate, options: string[], userJid: string): ActivityRecord | null {
+    const messageId = update.pollUpdateMessageKey?.id
+    const timestamp = Math.floor(Number(update.senderTimestampMs || update.serverTimestampMs || 0) / 1000)
+    if (!messageId || !timestamp) return null
+
+    return new ActivityRecord({
+      groupJid, userJid, messageId, timestamp,
+      parentId: pollMsgId,
+      eventType: 'poll_vote',
+      metadata: { selectedOptions: pollOptionNames(update.vote?.selectedOptions || [], options) },
+    })
+  }
+
+  /** Create an event RSVP ActivityRecord from history sync. History RSVPs come
+   *  already decrypted, under the same message ID as the live one. */
+  static fromHistoryEventResponse(groupJid: string, eventMsgId: string, response: proto.IEventResponse, userJid: string): ActivityRecord | null {
+    const messageId = response.eventResponseMessageKey?.id
+    const timestamp = Math.floor(Number(response.timestampMs || response.eventResponseMessage?.timestampMs || 0) / 1000)
+    // Without an answer the row would replace the person's earlier answer with nothing
+    const answer = response.eventResponseMessage?.response
+    if (!messageId || !timestamp || answer == null) return null
+
+    return new ActivityRecord({
+      groupJid, userJid, messageId, timestamp,
+      parentId: eventMsgId,
+      eventType: 'event_response',
+      metadata: { response: eventResponseName(answer) },
     })
   }
 }

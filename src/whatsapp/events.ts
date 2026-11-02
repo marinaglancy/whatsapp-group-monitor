@@ -9,6 +9,7 @@ import { handleGroupsUpsert } from './handlers/group-join.js'
 import { handleGroupsUpdate } from './handlers/group-update.js'
 import { handleGroupParticipantsUpdate } from './handlers/group-participants.js'
 import { handleGroupJoinRequest } from './handlers/group-join-request.js'
+import { handleHistorySync } from './handlers/history-sync.js'
 import { logger } from '../utils/logger.js'
 
 export function setupEventHandlers(sock: WASocket, saveCreds: () => Promise<void>) {
@@ -29,6 +30,10 @@ export function setupEventHandlers(sock: WASocket, saveCreds: () => Promise<void
 
     if (events['messages.upsert']) {
       handleMessagesUpsert(events['messages.upsert'])
+    }
+
+    if (events['messaging-history.set']) {
+      handleHistorySync(events['messaging-history.set'])
     }
 
     if (events['messages.reaction']) {

@@ -20,7 +20,7 @@
     }
     h2 { color: #1a1a1a; font-size: 1.1rem; margin: 0 0 1.5rem; }
     label { display: block; color: #667781; font-size: 0.85rem; margin-bottom: 0.25rem; }
-    input {
+    input, select {
       width: 100%;
       padding: 0.6rem 0.8rem;
       border: 1px solid #ddd;
@@ -30,7 +30,7 @@
       box-sizing: border-box;
       margin-bottom: 1rem;
     }
-    input:focus { border-color: #25d366; }
+    input:focus, select:focus { border-color: #25d366; }
     textarea {
       width: 100%;
       padding: 0.6rem 0.8rem;
@@ -73,6 +73,13 @@
         <label for="page_size">Items per page</label>
         <input type="number" id="page_size" name="page_size" min="10" max="500" />
 
+        <label for="history_import">Chat history import</label>
+        <select id="history_import" name="history_import">
+          <option value="gaps">Only fill holes</option>
+          <option value="all">Save everything</option>
+        </select>
+        <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">When WhatsApp is linked, the phone sends a copy of the chat history. "Only fill holes" saves only messages, reactions, poll votes and event RSVPs sent after the first thing the bot recorded in each group. "Save everything" also saves older ones, and they then count in the stats.</p>
+
         <h2 style="margin-top:2rem">AI assistant</h2>
         <label for="gemini_model">Gemini model <a href="https://ai.google.dev/gemini-api/docs/models" target="_blank" rel="noopener" style="color:#667781;font-size:0.75rem">(available models)</a></label>
         <input type="text" id="gemini_model" name="gemini_model" placeholder="gemini-3.8-flash" />
@@ -111,6 +118,7 @@
         const data = await res.json();
         document.getElementById('project_name').value = data.project_name || '';
         document.getElementById('page_size').value = data.page_size || '50';
+        document.getElementById('history_import').value = data.history_import || 'gaps';
         document.getElementById('gemini_model').value = data.gemini_model || '';
         document.getElementById('ai_daily_limit').value = data.ai_daily_limit || '300';
         document.getElementById('timezone').value = data.timezone === 'UTC' ? '' : (data.timezone || '');
@@ -151,6 +159,7 @@
         const payload = {
           project_name: document.getElementById('project_name').value,
           page_size: document.getElementById('page_size').value,
+          history_import: document.getElementById('history_import').value,
           gemini_model: document.getElementById('gemini_model').value,
           ai_daily_limit: document.getElementById('ai_daily_limit').value,
           timezone: document.getElementById('timezone').value,

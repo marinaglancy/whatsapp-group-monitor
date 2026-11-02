@@ -72,6 +72,14 @@ describe('/api/settings AI keys', () => {
     expect((await get()).json().timezone).toBe('UTC')
   })
 
+  it('stores the history import mode and rejects unknown values', async () => {
+    expect((await get()).json().history_import).toBe('gaps')
+    expect((await post({ history_import: 'all' })).statusCode).toBe(200)
+    expect((await get()).json().history_import).toBe('all')
+    expect((await post({ history_import: 'everything' })).statusCode).toBe(400)
+    expect((await get()).json().history_import).toBe('all') // unchanged
+  })
+
   it('reports whether the system prompt is the shipped default', async () => {
     expect((await get()).json().ai_system_prompt_is_default).toBe(true)
     await post({ ai_system_prompt: 'You are a pirate.' })

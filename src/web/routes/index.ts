@@ -16,6 +16,7 @@ import { listJobs, getJob, getJobEvents, listJobGroups } from '../../db/queries/
 import { botJobStatuses, type BotJobStatus } from '../../db/schema.js'
 import { getUserGroupMemberships } from '../../db/queries/members.js'
 import { getUserActivityPerGroup } from '../../db/queries/activity.js'
+import { HISTORY_IMPORT_MODES, getHistoryImportMode } from '../../whatsapp/handlers/history-sync.js'
 import { registerBackupRoutes } from './backup.js'
 import { syncGroups } from '../../whatsapp/handlers/group-sync.js'
 
@@ -96,6 +97,7 @@ export function registerRoutes(app: FastifyInstance) {
       ai_system_prompt: getAiSettings().systemPrompt,
       ai_system_prompt_is_default: !(getSetting('ai_system_prompt') || '').trim(),
       timezone: getAiSettings().timezone,
+      history_import: getHistoryImportMode(),
     })
   })
 
@@ -111,7 +113,10 @@ export function registerRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: `Unknown timezone: ${tz}` })
       }
     }
-    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit', 'ai_system_prompt', 'timezone']
+    if ('history_import' in body && !(HISTORY_IMPORT_MODES as readonly unknown[]).includes(body.history_import)) {
+      return reply.status(400).send({ error: `Unknown history import mode: ${body.history_import}` })
+    }
+    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit', 'ai_system_prompt', 'timezone', 'history_import']
     for (const key of allowed) {
       if (key in body && typeof body[key] === 'string') {
         setSetting(key, body[key])
