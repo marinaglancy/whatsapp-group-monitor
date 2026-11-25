@@ -12,8 +12,9 @@ export const ERROR_MESSAGE_TEXT_MAX = 200
 
 /** Where a trigger type posts its errors. */
 export interface ErrorTarget {
-  /** Post the rendered error text; returns the message id. */
-  send(job: BotJob, trigger: BotTrigger, text: string): Promise<string | null>
+  /** Post the rendered error text; returns the group it was posted in and the
+   *  message id, recorded on the error_sent event. */
+  send(job: BotJob, trigger: BotTrigger, text: string): Promise<{ groupJid: string; messageId: string | null } | null>
   /** At most one post per trigger in this period; others are only logged. 0 = no throttle. */
   throttleMs: number
 }
@@ -65,8 +66,8 @@ export function buildTriggerErrorNotifier(target: ErrorTarget, now: () => number
       lastPostAt.set(trigger.id, t)
     }
     try {
-      const messageId = await target.send(job, trigger, text)
-      addJobEvent(job.id, 'error_sent', { groupJid: job.groupJid, messageId })
+      const posted = await target.send(job, trigger, text)
+      addJobEvent(job.id, 'error_sent', { groupJid: posted?.groupJid ?? null, messageId: posted?.messageId ?? null })
     } catch (sendErr) {
       // nothing was posted: the next error may try again
       if (target.throttleMs > 0) {

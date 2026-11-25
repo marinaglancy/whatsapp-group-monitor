@@ -133,7 +133,10 @@ export function setupBot(overrides: Partial<QaResponderDeps> = {}): void {
   }
   registerJobHandler('qa_answer', createQaJobHandler(deps), {
     // errors are a reply to the question, every time
-    onFailure: buildTriggerErrorNotifier({ send: (job, _t, text) => deps.sendReply(job, text), throttleMs: 0 }),
+    onFailure: buildTriggerErrorNotifier({
+      send: async (job, _t, text) => ({ groupJid: job.groupJid!, messageId: await deps.sendReply(job, text) }),
+      throttleMs: 0,
+    }),
     // a TriggerJobError has a known cause (it may quote the AI's own words,
     // which can sound transient); a gone trigger stays gone
     shouldRetry: err => !(err instanceof TriggerJobError) && !(err instanceof TriggerGoneError) && isTransientAiError(err),

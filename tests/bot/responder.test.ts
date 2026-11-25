@@ -69,7 +69,10 @@ function setTriggerConfig(config: Partial<QaTriggerConfig>, name?: string): void
 
 function makeNotifier() {
   return buildTriggerErrorNotifier({
-    send: async (job, _t, text) => { sent.push({ text, jobId: job.id }); return `ERR${sent.length}` },
+    send: async (job, _t, text) => {
+      sent.push({ text, jobId: job.id })
+      return { groupJid: job.groupJid!, messageId: `ERR${sent.length}` }
+    },
     throttleMs: 0,
   })
 }

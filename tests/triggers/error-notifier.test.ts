@@ -78,7 +78,10 @@ function setTriggerConfig(config: Partial<QaTriggerConfig>, name?: string): void
 /** Mentions' target: a reply to the question, never throttled. */
 function makeNotifier() {
   return buildTriggerErrorNotifier({
-    send: async (job, _t, text) => { sent.push({ text, jobId: job.id }); return `ERR${sent.length}` },
+    send: async (job, _t, text) => {
+      sent.push({ text, jobId: job.id })
+      return { groupJid: job.groupJid!, messageId: `ERR${sent.length}` }
+    },
     throttleMs: 0,
   })
 }
@@ -142,7 +145,7 @@ describe('trigger error notifier with a throttled target', () => {
   const target = (over: Partial<ErrorTarget> = {}): ErrorTarget => ({
     send: async (job, trigger: BotTrigger, text) => {
       sent.push({ text, jobId: job.id, triggerId: trigger.id })
-      return `ERR${sent.length}`
+      return { groupJid: 'reports@g.us', messageId: `ERR${sent.length}` }
     },
     throttleMs: TEN_MIN,
     ...over,
@@ -157,7 +160,8 @@ describe('trigger error notifier with a throttled target', () => {
       text: 'Check failed for @asker in Alpha: the daily AI usage limit (3 calls) is reached',
       jobId: job.id, triggerId: reportTriggerId,
     }])
-    expect(getJobEvents(job.id)[0]).toMatchObject({ eventType: 'error_sent', messageId: 'ERR1' })
+    // the event says where the error was posted, not the job's group
+    expect(getJobEvents(job.id)[0]).toMatchObject({ eventType: 'error_sent', groupJid: 'reports@g.us', messageId: 'ERR1' })
   })
 
   it('posts at most once per trigger in the period; after it, posts again', async () => {
@@ -193,7 +197,7 @@ describe('trigger error notifier with a throttled target', () => {
       send: async (job, trigger, text) => {
         if (down) throw new Error('Connection Closed')
         sent.push({ text, jobId: job.id, triggerId: trigger.id })
-        return 'ERR'
+        return { groupJid: 'reports@g.us', messageId: 'ERR' }
       },
     }), () => clock)
     const first = reportJob('one')
