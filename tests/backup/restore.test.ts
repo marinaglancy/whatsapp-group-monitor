@@ -19,7 +19,7 @@ const NOW_S = Math.floor(Date.now() / 1000)
 
 /** How many messages the bot's message_search tool finds for a word. */
 function searchHits(word: string, groupJids: string[]): number {
-  const ctx = { scope: { entries: [], groupJids, names: new Map(), qaInstructions: null }, timezone: 'UTC', nowMs: () => Date.now() }
+  const ctx = { scope: { entries: [], groupJids, names: new Map() }, timezone: 'UTC', nowMs: () => Date.now() }
   const out = JSON.parse(executeQaTool('message_search', { query: [`"${word}"`] }, ctx).result)
   if (out.error) throw new Error(out.error)
   return out.total

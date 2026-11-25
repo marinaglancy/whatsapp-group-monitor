@@ -14,8 +14,6 @@ export interface QaScope {
   entries: QaScopeEntry[]
   groupJids: string[]
   names: Map<string, string>
-  /** Only set by resolveQaScope (legacy, removed with it). */
-  qaInstructions?: string | null
 }
 
 /** Resolve a tenant's direct entries into concrete group jids.
@@ -26,17 +24,12 @@ export function resolveTenantScope(tenantId: number, selfJid: string): QaScope {
   return resolveScope(selfJid, getTenantEntries(tenantId))
 }
 
-/** Resolve a QA group's linked jids into concrete group jids (same rules as resolveTenantScope). */
-export function resolveQaScope(qaGroupJid: string): QaScope {
-  const qaGroup = getAllGroups().find(g => g.jid === qaGroupJid)
-  const scope = resolveScope(qaGroupJid, qaGroup?.qaLinkedJids ?? [])
-  return { ...scope, qaInstructions: qaGroup?.qaInstructions ?? null }
-}
-
-function resolveScope(qaGroupJid: string, linked: string[]): QaScope {
+/** The asking group (selfJid) first, then each entry jid: a community adds
+ *  its children, a single group itself. */
+function resolveScope(selfJid: string, entryJids: string[]): QaScope {
   const all = getAllGroups() // linkAll() already applied inside
   const byJid = new Map(all.map(g => [g.jid, g]))
-  const qaGroup = byJid.get(qaGroupJid)
+  const self = byJid.get(selfJid)
 
   const entries: QaScopeEntry[] = []
   const groupJids: string[] = []
@@ -50,13 +43,13 @@ function resolveScope(qaGroupJid: string, linked: string[]): QaScope {
     names.set(jid, name)
   }
 
-  if (qaGroup) {
-    entries.push({ jid: qaGroup.jid, name: qaGroup.name, isCommunity: false, children: [], isSelf: true })
-    addGroup(qaGroup.jid, qaGroup.name)
+  if (self) {
+    entries.push({ jid: self.jid, name: self.name, isCommunity: false, children: [], isSelf: true })
+    addGroup(self.jid, self.name)
   }
 
-  for (const jid of linked) {
-    if (jid === qaGroupJid) continue // already present as the self entry
+  for (const jid of entryJids) {
+    if (jid === selfJid) continue // already present as the self entry
     const g = byJid.get(jid)
     if (!g) continue
     if (g.isCommunity) {

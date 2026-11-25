@@ -17,8 +17,9 @@ class WatchdogTimeout extends Error {}
 
 export type JobHandler = (job: BotJob) => Promise<Record<string, unknown> | undefined>
 export interface JobHandlerOptions {
-  /** Called once when the job transitions to 'failed'. */
-  onFailure?: (job: BotJob, error: string) => Promise<void>
+  /** Called once when the job transitions to 'failed', with the stored error
+   *  text and the thrown error itself. */
+  onFailure?: (job: BotJob, error: string, err: unknown) => Promise<void>
   /** Whether this error is worth another attempt. Default: always retry. */
   shouldRetry?: (err: unknown) => boolean
 }
@@ -125,7 +126,7 @@ async function runJob(job: BotJob): Promise<void> {
       logger.error({ jobId: job.id, err }, 'Bot job failed permanently')
       if (entry.opts.onFailure) {
         try {
-          await entry.opts.onFailure(fresh, message)
+          await entry.opts.onFailure(fresh, message, err)
         } catch (notifyErr) {
           logger.error({ err: notifyErr, jobId: job.id }, 'Job onFailure notifier failed')
         }

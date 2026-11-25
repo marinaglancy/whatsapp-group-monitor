@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedTenant } from '../helpers/fixtures.js'
 import { updateGroupQaConfig, getGroup } from '../../src/db/queries/groups.js'
-import { resolveQaScope, resolveTenantScope } from '../../src/bot/scope.js'
+import { resolveTenantScope } from '../../src/bot/scope.js'
 import { getAccountDb } from '../../src/db/account.js'
 import { BOT_FUNCTION_QA, groups } from '../../src/db/schema.js'
 
@@ -52,68 +52,6 @@ describe('updateGroupQaConfig', () => {
     expect(json.qaEnabled).toBe(true)
     expect(json.qaLinkedJids).toEqual(['solo@g.us'])
     expect(json.qaInstructions).toBe('Hi.')
-  })
-})
-
-describe('resolveQaScope', () => {
-  it('expands a community to its current children', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['comm@g.us'] })
-    const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us', 'qa@g.us'])
-    const comm = scope.entries.find(e => e.isCommunity)!
-    expect(comm.children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])
-    expect(scope.names.get('a@g.us')).toBe('Alpha')
-  })
-
-  it('always includes the group itself, first and marked', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'] })
-    const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids).toEqual(['qa@g.us', 'solo@g.us'])
-    expect(scope.entries[0]).toMatchObject({ jid: 'qa@g.us', isSelf: true })
-    expect(scope.entries.filter(e => e.isSelf).length).toBe(1)
-  })
-
-  it('does not duplicate an explicitly self-linked group', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['qa@g.us', 'solo@g.us'] })
-    const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids).toEqual(['qa@g.us', 'solo@g.us'])
-    expect(scope.entries.filter(e => e.jid === 'qa@g.us').length).toBe(1)
-  })
-
-  it('dedupes overlap between a community and an explicitly linked child', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['comm@g.us', 'a@g.us', 'solo@g.us'] })
-    const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us', 'qa@g.us', 'solo@g.us'])
-  })
-
-  it('silently drops vanished jids and communities with no children', () => {
-    seedGroup('empty-comm@g.us', 'Empty Community', { isCommunity: true })
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['gone@g.us', 'empty-comm@g.us'] })
-    const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids).toEqual(['qa@g.us']) // only itself
-    expect(scope.entries.length).toBe(2) // self + the empty community; the vanished jid is not listed
-  })
-
-  it('returns an empty scope for unknown groups, self-only for unconfigured ones', () => {
-    expect(resolveQaScope('qa@g.us').groupJids).toEqual(['qa@g.us'])
-    expect(resolveQaScope('nope@g.us').groupJids).toEqual([])
-  })
-
-  it('drops groups the bot has left from scope (Review Focus 5)', () => {
-    seedGroup('left@g.us', 'Left Group', { botMembership: 'none' })
-    seedGroup('c@g.us', 'Gamma', { parentCommunityJid: 'comm@g.us', botMembership: 'none' })
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['left@g.us', 'comm@g.us'] })
-    const scope = resolveQaScope('qa@g.us')
-    expect(scope.groupJids.sort()).toEqual(['a@g.us', 'b@g.us', 'qa@g.us'])
-    expect(scope.entries.find(e => e.jid === 'left@g.us')).toBeUndefined()
-    const comm = scope.entries.find(e => e.jid === 'comm@g.us')!
-    expect(comm.children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])
-  })
-
-  it('carries the QA group instructions', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'], instructions: 'Be terse.' })
-    expect(resolveQaScope('qa@g.us').qaInstructions).toBe('Be terse.')
-    expect(resolveQaScope('solo@g.us').qaInstructions).toBeNull()
   })
 })
 
@@ -173,11 +111,6 @@ describe('resolveTenantScope', () => {
     expect(scope.entries.find(e => e.jid === 'left@g.us')).toBeUndefined()
     const comm = scope.entries.find(e => e.jid === 'comm@g.us')!
     expect(comm.children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])
-  })
-
-  it('does not set qaInstructions', () => {
-    const t = seedTenant('T', ['solo@g.us'])
-    expect(resolveTenantScope(t, 'qa@g.us').qaInstructions).toBeUndefined()
   })
 
   it('puts a group added to the community later in scope without touching the tenant', () => {

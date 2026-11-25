@@ -2,8 +2,10 @@ import { generateMessageID, generateWAMessageFromContent } from 'baileys'
 import { ActivityRecord } from '../whatsapp/activity/record.js'
 import { registerJobHandler, type JobHandler } from './worker.js'
 import { registerSentMessage } from './sent-registry.js'
-import { resolveQaScope } from './scope.js'
-import { createQaAnswerHandler, buildQaFailureNotifier, isTransientAiError, type QaResponderDeps } from './responder.js'
+import type { QaScope } from './scope.js'
+import {
+  createQaAnswerHandler, buildTriggerErrorNotifier, isTransientAiError, loadQaTrigger, type QaResponderDeps,
+} from './responder.js'
 import { addJobEvent, hasJobEvent } from '../db/queries/jobs.js'
 import { getSock } from '../whatsapp/client.js'
 import { getCreationRecord } from '../db/queries/activity.js'
@@ -15,6 +17,7 @@ import { createGeminiProvider } from '../ai/gemini.js'
 import type { BotJob } from '../db/schema.js'
 import { logger } from '../utils/logger.js'
 import { registerBuiltinTriggerTypes } from '../triggers/index.js'
+import { TriggerGoneError, TriggerJobError } from '../triggers/errors.js'
 
 const TOOL_ECHO_CROP = 3_000
 const TOOL_ECHO_LOG_MAX = 2_000
@@ -124,9 +127,11 @@ export async function setComposing(groupJid: string): Promise<void> {
 }
 
 /** Debug commands that bypass the AI entirely: "!tools" lists the tool
- *  catalog, "!tool <name> <json>" executes one against the real scope and
+ *  catalog, "!tool <name> <json>" executes one against the tenant's groups and
  *  echoes the result. Free to run — no provider call, no tokens. */
-async function runToolEcho(job: BotJob, cleaned: string, sendReply: QaResponderDeps['sendReply']): Promise<Record<string, unknown>> {
+async function runToolEcho(
+  job: BotJob, cleaned: string, sendReply: QaResponderDeps['sendReply'], scope: QaScope,
+): Promise<Record<string, unknown>> {
   if (hasJobEvent(job.id, 'reply_sent')) {
     return { note: 'reply already sent by a previous attempt' }
   }
@@ -159,7 +164,7 @@ async function runToolEcho(job: BotJob, cleaned: string, sendReply: QaResponderD
         extra = { stub: true, tool: name }
       } else {
         const ctx = {
-          scope: resolveQaScope(job.groupJid!),
+          scope,
           timezone: getAiSettings().timezone,
         }
         const executed = executeQaTool(name, args, ctx)
@@ -196,7 +201,8 @@ function createQaJobHandler(deps: QaResponderDeps): JobHandler {
     // strip leading mention tokens so "@bot !tool ..." works
     const cleaned = question.replace(/^(@\d+\s*)+/, '').trim()
     if (cleaned === '!tools' || cleaned === '!tool' || cleaned.startsWith('!tool ')) {
-      return runToolEcho(job, cleaned, deps.sendReply)
+      const { scope } = loadQaTrigger(job)
+      return runToolEcho(job, cleaned, deps.sendReply, scope)
     }
     return respond(job)
   }
@@ -212,7 +218,9 @@ export function setupBot(overrides: Partial<QaResponderDeps> = {}): void {
     ...overrides,
   }
   registerJobHandler('qa_answer', createQaJobHandler(deps), {
-    onFailure: buildQaFailureNotifier(deps),
-    shouldRetry: isTransientAiError,
+    onFailure: buildTriggerErrorNotifier(deps),
+    // a TriggerJobError has a known cause (it may quote the AI's own words,
+    // which can sound transient); a gone trigger stays gone
+    shouldRetry: err => !(err instanceof TriggerJobError) && !(err instanceof TriggerGoneError) && isTransientAiError(err),
   })
 }

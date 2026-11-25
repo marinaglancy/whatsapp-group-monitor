@@ -1,13 +1,21 @@
-import type { BotJob } from '../db/schema.js'
+import type { BotJob, BotTrigger } from '../db/schema.js'
 import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider, type AiToolCall } from '../ai/provider.js'
 import { getAiSettings, expandPlaceholders, type AiSettings } from '../ai/settings.js'
 import { loadToolDeclarations } from '../ai/tools/loader.js'
 import { executeQaTool } from '../ai/tools/executors.js'
-import { AI_BUSY_RE } from '../triggers/errors.js'
-import { resolveQaScope, type QaScope } from './scope.js'
+import {
+  AI_BUSY_RE, ERROR_TEXT, TriggerGoneError, TriggerJobError, errorTextFor, renderErrorTemplate,
+} from '../triggers/errors.js'
+import { parseAiAnswer, SEND_ANSWER_SCHEMA_WITH_TOOLS } from '../triggers/ai-answer.js'
+import { QA_ANSWER_SPEC } from '../triggers/qa/answer.js'
+import { DEFAULT_QA_SYSTEM_PROMPT, QA_DEFAULT_ERROR_TEMPLATE } from '../triggers/qa/defaults.js'
+import { qaTriggerType, type QaTriggerConfig } from '../triggers/qa/type.js'
+import { resolveTenantScope, type QaScope } from './scope.js'
 import { getBotUser } from '../whatsapp/handlers/connection.js'
 import { getCreationRecord } from '../db/queries/activity.js'
 import { getJob, addJobAiUsage, addJobEvent, getJobEvents, hasJobEvent, sumAiCallsToday } from '../db/queries/jobs.js'
+import { getTrigger } from '../db/queries/triggers.js'
+import { getGroup } from '../db/queries/groups.js'
 import { qUsersByJids, qDataSince } from '../db/queries/group-tools.js'
 import { formatDateTime } from '../utils/time.js'
 import type { JobHandler } from './worker.js'
@@ -26,7 +34,8 @@ export const QA_CONTEXT_MAX_AGE_MS = 48 * 3600_000
 export const QA_THREAD_MAX_DEPTH = 10
 export const QA_ANSWER_MAX_CHARS = 3_500
 export const TOOL_RESULT_LOG_MAX = 2_000
-export const LIMIT_NOTICE_INTERVAL_MS = 3_600_000
+/** Longest question text put into the error template's {{message}}. */
+export const ERROR_MESSAGE_TEXT_MAX = 200
 
 export interface QaResponderDeps {
   createProvider: (opts: { apiKey: string; model: string }) => AiProvider
@@ -36,19 +45,29 @@ export interface QaResponderDeps {
 }
 
 /** Ends the last round's question: no tools are sent, so the model must answer. */
-const FINAL_ROUND_NOTE = 'You cannot call tools any more. Answer the question now, using only the results above. '
-  + 'If something is still missing, say briefly what.'
-/** Sent to the group when even the last round gives no answer. */
-const NO_ANSWER_REPLY = '⚠️ I could not find an answer this time. Please try a narrower question.'
-
-let lastLimitNoticeAt = 0
-
-export function resetLimitNoticeForTests(): void {
-  lastLimitNoticeAt = 0
-}
+const FINAL_ROUND_NOTE = 'You cannot call tools any more. Answer now with the JSON object described in the answer format, '
+  + 'using only the results above. If something is still missing, say briefly what in output.'
 
 function bareId(jid: string): string {
   return jid.split(':')[0].split('@')[0]
+}
+
+/** The trigger that created the job; null when it was deleted since, or the
+ *  job is from before triggers existed. */
+function jobTrigger(job: BotJob): BotTrigger | null {
+  return job.triggerId === null ? null : getTrigger(job.triggerId)
+}
+
+/** The job's trigger, its settings, and the groups of its tenant. A job
+ *  without its trigger fails quietly: TriggerGoneError posts nothing. */
+export function loadQaTrigger(job: BotJob): { trigger: BotTrigger; config: QaTriggerConfig; scope: QaScope } {
+  const trigger = jobTrigger(job)
+  if (!trigger) throw new TriggerGoneError(`The trigger of this job (${job.triggerId ?? 'none'}) no longer exists`)
+  return {
+    trigger,
+    config: qaTriggerType.normalize(trigger.config),
+    scope: resolveTenantScope(trigger.tenantId, job.groupJid ?? ''),
+  }
 }
 
 export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
@@ -63,25 +82,21 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
     const question = typeof job.payload?.text === 'string' ? job.payload.text : ''
     if (!question || !job.groupJid) throw new Error('qa_answer job has no question text or group')
 
+    const { config, scope } = loadQaTrigger(job)
     const settings = getAiSettings()
-    if (!settings.apiKey) {
-      return staticReply(job, deps, 'The AI assistant is not configured yet — an API key is missing in the settings.')
-    }
-    const scope = resolveQaScope(job.groupJid)
-    // no reachable group beyond the question group itself (nothing linked, or
-    // only vanished groups / childless communities): tell the admin, spend nothing
-    if (!scope.groupJids.some(j => j !== job.groupJid)) {
-      return staticReply(job, deps, 'No groups are linked for me to report on yet. Link groups or a community on the group page in the admin panel.')
-    }
+    if (!settings.apiKey) throw new TriggerJobError(ERROR_TEXT.noApiKey)
+    // no reachable group beyond the question group itself (none in the tenant,
+    // or only vanished groups / childless communities): spend nothing
+    if (!scope.groupJids.some(j => j !== job.groupJid)) throw new TriggerJobError(ERROR_TEXT.noOtherGroups)
 
-    await checkDailyLimit(job, deps, settings.dailyLimit, now)
+    checkDailyLimit(settings.dailyLimit, now)
 
     void deps.setComposing?.(job.groupJid)?.catch(() => { /* presence is best-effort */ })
 
     const provider = deps.createProvider({ apiKey: settings.apiKey, model: settings.model })
     const botLid = bareId(getBotUser()?.lid ?? getBotUser()?.jid ?? 'unknown')
     const values = { timezone: settings.timezone, botlid: botLid }
-    const system = buildSystemPrompt(scope, now(), settings, values)
+    const system = buildSystemPrompt(scope, now(), settings, config, values)
     const tools = loadToolDeclarations(values)
     const messages = buildThreadHistory(job)
     const historyTurns = messages.length
@@ -89,18 +104,20 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
     messages.push({ role: 'user', text: firstTurn })
     const deadline = now() + QA_JOB_TIMEOUT_MS
     let answer: string | null = null
+    let invalidOnToolRound = false
 
     for (let round = 1; round <= QA_MAX_ROUNDS; round++) {
-      if (round > 1) await checkDailyLimit(job, deps, settings.dailyLimit, now)
-      // the last round sends no tools, so the model has to reply in text
+      if (round > 1) checkDailyLimit(settings.dailyLimit, now)
+      // the last round sends no tools, so the model has to answer
       const toolsOff = round === QA_MAX_ROUNDS ? 'last round'
         : deadline - now() < QA_FINAL_ROUND_RESERVE_MS ? 'time almost up'
+        : invalidOnToolRound ? 'invalid answer'
         : null
 
       const started = now()
       const resp = await provider.generate(toolsOff
-        ? { system, messages: buildFinalRoundMessages(messages, historyTurns), tools: [] }
-        : { system, messages, tools })
+        ? { system, messages: buildFinalRoundMessages(messages, historyTurns), tools: [], responseSchema: QA_ANSWER_SPEC.modelSchema }
+        : { system, messages, tools, ...(SEND_ANSWER_SCHEMA_WITH_TOOLS ? { responseSchema: QA_ANSWER_SPEC.modelSchema } : {}) })
       addJobAiUsage(job.id, { calls: 1, tokensIn: resp.usage.tokensIn, tokensOut: resp.usage.tokensOut })
       addJobEvent(job.id, 'ai_call', {
         groupJid: job.groupJid,
@@ -138,24 +155,25 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
         continue
       }
 
-      const text = resp.text?.trim()
-      if (!text && toolsOff) {
-        // no chance left: tell the group honestly rather than a generic apology
-        // (the failure notifier stays silent once reply_sent is recorded)
-        const why = resp.toolCalls?.length ? 'the AI still asked for tools' : 'the AI returned no text'
-        const sentId = await deps.sendReply(job, NO_ANSWER_REPLY)
-        addJobEvent(job.id, 'reply_sent', {
-          groupJid: job.groupJid, userJid: job.userJid, messageId: sentId,
-          data: { chars: NO_ANSWER_REPLY.length, fallback: true },
-        })
-        throw new Error(`No answer on the last round: ${why}`)
+      const parsed = parseAiAnswer(resp.text, QA_ANSWER_SPEC)
+      if (parsed?.error) throw new TriggerJobError(parsed.errormessage?.trim() || ERROR_TEXT.aiCouldNotAnswer)
+      const output = parsed?.output?.trim()
+      if (output) {
+        answer = output
+        break
       }
-      if (!text) throw new Error('AI returned an empty response')
-      answer = text
-      break
+      // prose, an empty text or a blank output: on a tool round the next round
+      // is the final one (tools off, schema on); on the final round we give up
+      if (!toolsOff) {
+        invalidOnToolRound = true
+        continue
+      }
+      const why = !resp.text?.trim() ? (resp.toolCalls?.length ? 'the AI still asked for tools' : 'the AI returned no text')
+        : 'the text is not a valid JSON answer'
+      throw new TriggerJobError(ERROR_TEXT.invalidAnswer, `No valid answer on the final round: ${why}`)
     }
 
-    // unreachable: the last round either answers or throws
+    // unreachable: the final round either answers or throws
     if (!answer) throw new Error('No answer from the AI')
     if (answer.length > QA_ANSWER_MAX_CHARS) {
       answer = answer.slice(0, QA_ANSWER_MAX_CHARS) + '\n… _(truncated — ask me to narrow it down)_'
@@ -206,57 +224,50 @@ export function isTransientAiError(err: unknown): boolean {
   return AI_BUSY_RE.test(text) || NETWORK_RE.test(text)
 }
 
-/** onFailure notifier for the worker: short apology, never internals. Stays
- *  silent when the group already got a message for this job (a limit notice,
- *  or the answer itself before a late crash). */
-export function buildQaFailureNotifier(deps: Pick<QaResponderDeps, 'sendReply'>) {
-  return async function notifyQaFailure(job: BotJob, error: string): Promise<void> {
-    if (hasJobEvent(job.id, 'reply_sent') || hasJobEvent(job.id, 'limit_notice')) return
-    // skip stack frames: a line number like ":429:" is not a rate limit
-    const busy = AI_BUSY_RE.test(error.split('\n').filter(l => !/^\s+at /.test(l)).join('\n'))
-    const text = busy
-      ? '⚠️ I could not answer — the AI service is busy right now. Please try again in a minute.'
-      : '⚠️ Sorry, I could not process that question. The details are in the admin panel job log.'
+/** onFailure notifier for the worker: posts the trigger's error template as a
+ *  reply to the question, with a short {{error}} text, never internals. Stays
+ *  silent when the answer was already sent (a late crash), or when the job's
+ *  trigger is gone. */
+export function buildTriggerErrorNotifier(deps: Pick<QaResponderDeps, 'sendReply'>) {
+  return async function notifyTriggerError(job: BotJob, error: string, err: unknown): Promise<void> {
+    if (hasJobEvent(job.id, 'reply_sent') || err instanceof TriggerGoneError) return
+    const trigger = jobTrigger(job)
+    if (!trigger) return
+    const config = qaTriggerType.normalize(trigger.config)
+    const question = typeof job.payload?.text === 'string' ? job.payload.text : ''
+    const text = renderErrorTemplate(config.errorTemplate.trim() || QA_DEFAULT_ERROR_TEMPLATE, {
+      error: errorTextFor(err, error),
+      trigger: trigger.name,
+      group: (job.groupJid && getGroup(job.groupJid)?.name) || job.groupJid || '',
+      user: job.userJid ? '@' + bareId(job.userJid) : '',
+      message: question.slice(0, ERROR_MESSAGE_TEXT_MAX),
+    })
     try {
-      await deps.sendReply(job, text)
-    } catch (err) {
-      logger.error({ err, jobId: job.id }, 'Failed to send failure notice')
+      const messageId = await deps.sendReply(job, text)
+      addJobEvent(job.id, 'error_sent', { groupJid: job.groupJid, messageId })
+    } catch (sendErr) {
+      logger.error({ err: sendErr, jobId: job.id }, 'Failed to send the error message')
     }
   }
 }
 
-async function staticReply(job: BotJob, deps: QaResponderDeps, text: string): Promise<Record<string, unknown>> {
-  const sentId = await deps.sendReply(job, text)
-  addJobEvent(job.id, 'reply_sent', {
-    groupJid: job.groupJid, userJid: job.userJid, messageId: sentId,
-    data: { chars: text.length, static: true },
-  })
-  return { replyMessageId: sentId, answerChars: text.length, static: true }
-}
-
-async function checkDailyLimit(job: BotJob, deps: QaResponderDeps, limit: number, now: () => number): Promise<void> {
+/** Over the limit every question fails with its own error post: each one is
+ *  a person waiting. */
+function checkDailyLimit(limit: number, now: () => number): void {
   if (limit <= 0) return
   if (sumAiCallsToday(now()) < limit) return
-  // Always record the cause on the job (this also keeps the failure notifier
-  // silent for it); the group message itself is throttled to once per hour.
-  addJobEvent(job.id, 'limit_notice', { groupJid: job.groupJid })
-  if (now() - lastLimitNoticeAt >= LIMIT_NOTICE_INTERVAL_MS) {
-    lastLimitNoticeAt = now()
-    try {
-      await deps.sendReply(job, `⚠️ The daily AI usage limit (${limit} calls) is reached. Try again tomorrow, or raise the limit in the settings.`)
-    } catch (err) {
-      logger.error({ err, jobId: job.id }, 'Failed to send limit notice')
-    }
-  }
-  throw new Error(`Daily AI call limit reached (${limit})`)
+  throw new TriggerJobError(ERROR_TEXT.dailyLimit(limit))
 }
 
-function buildSystemPrompt(scope: QaScope, nowMs: number, settings: AiSettings, values: Record<string, string>): string {
-  // The editable template goes first; the structural parts (date anchor, scope
-  // listing, per-group instructions) stay in code. INVARIANT: nothing here is
-  // an epoch number, and nothing says "Q&A" — that is app jargon.
+function buildSystemPrompt(
+  scope: QaScope, nowMs: number, settings: AiSettings, config: QaTriggerConfig, values: Record<string, string>,
+): string {
+  // The editable prompt goes first; the structural parts (date anchor, scope
+  // listing, the administrators' instructions, the answer format) stay in code.
+  // INVARIANT: nothing here is an epoch number, and nothing says "Q&A" — that
+  // is app jargon.
   const lines: string[] = []
-  lines.push(expandPlaceholders(settings.systemPrompt, values))
+  lines.push(expandPlaceholders(config.prompt.trim() || DEFAULT_QA_SYSTEM_PROMPT, values))
   lines.push('')
   lines.push(`Current date and time: ${formatDateTime(new Date(nowMs), settings.timezone)} (${settings.timezone}).`)
   // the last round has tools off, so one fewer round can call them
@@ -284,18 +295,24 @@ function buildSystemPrompt(scope: QaScope, nowMs: number, settings: AiSettings, 
       lines.push(`- "${e.name}" (${e.jid})${d ? ` — data since ${d}` : ''}`)
     }
   }
-  if (scope.qaInstructions) {
+  const instructions = config.instructions.trim()
+  if (instructions) {
     lines.push('')
     lines.push('Additional instructions from the group administrators:')
-    lines.push(expandPlaceholders(scope.qaInstructions, values))
+    lines.push(expandPlaceholders(instructions, values))
   }
+  // last: the code reads the answer in this format
+  lines.push('')
+  lines.push(QA_ANSWER_SPEC.formatSection)
   return lines.join('\n')
 }
 
 /** Replay the ancestor exchanges of a follow-up thread as user/model turns.
  *  Each ancestor contributes its question and its final answer text (read from
  *  the activity log via the reply_sent event — referenced, never duplicated),
- *  never its intermediate tool calls. Nearest QA_THREAD_MAX_DEPTH ancestors. */
+ *  never its intermediate tool calls. The answer is replayed in the JSON answer
+ *  format, so the model sees its own format. Nearest QA_THREAD_MAX_DEPTH
+ *  ancestors. */
 function buildThreadHistory(job: BotJob): AiChatMessage[] {
   const chain: { q: string; a: string }[] = []
   let parentId = job.payload?.parentJobId
@@ -310,7 +327,7 @@ function buildThreadHistory(job: BotJob): AiChatMessage[] {
   chain.reverse()
   return chain.flatMap((x): AiChatMessage[] => [
     { role: 'user', text: x.q },
-    { role: 'assistant', text: x.a },
+    { role: 'assistant', text: JSON.stringify({ error: false, output: x.a }) },
   ])
 }
 
@@ -323,13 +340,13 @@ function ancestorAnswerText(parent: BotJob): string | null {
     if (typeof text === 'string' && text) return text
   }
   // Fallback (echo not recorded yet, or the reply was deleted): the last
-  // ai_call event carries the answer text capped at 4,000 chars — complete,
-  // since answers are capped at QA_ANSWER_MAX_CHARS.
+  // ai_call event carries the answer text capped at 4,000 chars — the JSON
+  // answer, or the plain answer for jobs from before JSON answers.
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]
     if (e.eventType !== 'ai_call') continue
     const text = (e.data?.response as { text?: unknown } | undefined)?.text
-    if (typeof text === 'string' && text) return text
+    if (typeof text === 'string' && text) return parseAiAnswer(text, QA_ANSWER_SPEC)?.output || text
   }
   return null
 }

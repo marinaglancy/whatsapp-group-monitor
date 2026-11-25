@@ -66,6 +66,21 @@ describe('worker', () => {
     expect(failures.length).toBe(1)
   })
 
+  it('passes the thrown error object to onFailure', async () => {
+    const boom = new Error('boom')
+    const failures: { jobId: number; error: string; err: unknown }[] = []
+    registerJobHandler('qa_answer', async () => { throw boom }, {
+      shouldRetry: () => false,
+      onFailure: async (job, error, err) => { failures.push({ jobId: job.id, error, err }) },
+    })
+    const id = insertJob({ jobType: 'qa_answer', messageId: 'M1', runAt: NOW() })!
+    await runWorkerPass()
+    expect(failures.length).toBe(1)
+    expect(failures[0].jobId).toBe(id)
+    expect(failures[0].err).toBe(boom)
+    expect(failures[0].error).toContain('boom')
+  })
+
   it('hands the thrown error to shouldRetry and retries when it agrees', async () => {
     let calls = 0
     const asked: string[] = []

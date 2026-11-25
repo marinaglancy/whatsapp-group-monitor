@@ -5,7 +5,6 @@ import { seedGroup, seedMessage, seedTenant, seedQaTrigger } from '../helpers/fi
 import { handleHistorySync } from '../../src/whatsapp/handlers/history-sync.js'
 import { setSetting } from '../../src/db/queries/settings.js'
 import { updateBotUser } from '../../src/whatsapp/handlers/connection.js'
-import { updateGroupQaConfig } from '../../src/db/queries/groups.js'
 import { registerBuiltinTriggerTypes } from '../../src/triggers/index.js'
 import { getAccountDb } from '../../src/db/account.js'
 import { groupActivityLog, botJobs } from '../../src/db/schema.js'
@@ -130,7 +129,6 @@ describe('history sync import', () => {
   it('never starts a Q&A answer, even for a recent question to the bot', () => {
     setSetting('history_import', 'all')
     updateBotUser({ id: '15550001234@s.whatsapp.net', lid: '98765432101234@lid' } as never)
-    updateGroupQaConfig('g1@g.us', { enabled: true, linkedJids: [] })
     registerBuiltinTriggerTypes()
     seedQaTrigger(seedTenant('T', ['g1@g.us']), 'g1@g.us')
     const now = Math.floor(Date.now() / 1000)
