@@ -4,6 +4,7 @@ import { seedGroup, seedUser, seedMember, seedMessage, seedTenant, seedSpamTrigg
 import { fakeProvider } from '../helpers/fake-provider.js'
 import { updateBotUser } from '../../src/whatsapp/handlers/connection.js'
 import { setSetting } from '../../src/db/queries/settings.js'
+import { formatDateTime } from '../../src/utils/time.js'
 import { setTenantGroups } from '../../src/db/queries/tenants.js'
 import { resolveMentionTokens } from '../../src/whatsapp/actions.js'
 import { setTriggerEnabled, updateTrigger } from '../../src/db/queries/triggers.js'
@@ -264,6 +265,24 @@ describe('spam_check handler: what the AI is given', () => {
     ].join('\n'))).toBe(true)
     expect(turn.text.indexOf(TEXT)).toBeGreaterThan(turn.text.indexOf('Copies:'))
     expect(turn.text.split(TEXT).length).toBe(2)
+  })
+
+  it('lists every copy with its group and its time in the configured timezone, oldest first', async () => {
+    setSetting('timezone', 'Europe/Lisbon')
+    const weekAgo = NOW_S - 7 * 86_400
+    seedCopy('b@g.us', TEXT, 'conversation', weekAgo)
+    seedCopy('c@g.us', TEXT, 'conversation', NOW_S - 20)
+    const provider = fakeProvider([verdict(false, false)])
+    await makeHandler(provider)(copyJob('a@g.us'))
+
+    const turn = (provider.calls[0].messages[0] as { text: string }).text
+    expect(turn).toContain([
+      'Copies: the sender posted 3 messages with this text (this one included, deleted ones not counted):',
+      `- "Beta" (b@g.us) at ${formatDateTime(weekAgo, 'Europe/Lisbon')}`,
+      `- "Gamma" (c@g.us) at ${formatDateTime(NOW_S - 20, 'Europe/Lisbon')}`,
+      `- "Alpha" (a@g.us) at ${formatDateTime(NOW_S - 10, 'Europe/Lisbon')} (this message)`,
+      '',
+    ].join('\n'))
   })
 
   it('says a message without text has none, with no text block', async () => {

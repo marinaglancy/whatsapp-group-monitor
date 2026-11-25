@@ -261,9 +261,9 @@ function roleLabel(m: MembershipLevel | undefined): string {
   }
 }
 
-/** The first user turn: the message, its sender, the copies found, and last
- *  the sender's text between markers, so it cannot pass for the lines above
- *  it. No epoch numbers. */
+/** The first user turn: the message, its sender, the copies found with their
+ *  groups and times, and last the sender's text between markers, so it cannot
+ *  pass for the lines above it. No epoch numbers. */
 function buildFirstTurn(input: JudgeInput, settings: AiSettings, sender: { name: string | null; phone: string | null }): string {
   const { msg, copies, scope } = input
   const member = getMembership(msg.groupJid, msg.userJid)
@@ -286,10 +286,12 @@ function buildFirstTurn(input: JudgeInput, settings: AiSettings, sender: { name:
     '',
   ]
   if (msg.textKey) {
-    const groups = unique(copies.map(c => c.groupJid))
     lines.push(`Copies: the sender posted ${copies.length} ${copies.length === 1 ? 'message' : 'messages'} with this text `
-      + `(this one included, deleted ones not counted), in ${groups.length === 1 ? 'the group' : 'the groups'}: `
-      + `${groups.map(g => groupLabel(scope, g)).join(', ')}.`)
+      + '(this one included, deleted ones not counted):')
+    for (const c of copies) {
+      const self = c.groupJid === msg.groupJid && c.messageId === msg.messageId ? ' (this message)' : ''
+      lines.push(`- ${groupLabel(scope, c.groupJid)} at ${formatDateTime(c.timestamp, settings.timezone)}${self}`)
+    }
   } else {
     lines.push('Copies: not searched, because the message has no text.')
   }
