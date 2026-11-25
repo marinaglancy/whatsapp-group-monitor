@@ -30,6 +30,16 @@
     .default-box.open { display: block; }
     .error { color: #c62828; font-size: 0.82rem; margin-bottom: 0.5rem; }
     .loading { text-align: center; padding: 2rem; color: #667781; }
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 20; padding: 2rem 1rem; overflow-y: auto; }
+    .overlay.open { display: block; }
+    .modal { background: #fff; border-radius: 10px; max-width: 480px; margin: 0 auto; padding: 1rem 1.25rem; box-shadow: 0 8px 30px rgba(0,0,0,0.25); }
+    .modal h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+    .modal .list { border: 1px solid #eee; border-radius: 6px; padding: 0.5rem; font-size: 0.85rem; max-height: 50vh; overflow-y: auto; }
+    .modal .list div { padding: 0.2rem 0; }
+    #spam-groups-filter { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; }
+    .modal .actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 0.8rem; }
+    .box { border: 1px solid #eee; border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.85rem; }
+    .box > div { margin: 0.3rem 0; }
   </style>
 </head>
 <body>
@@ -37,6 +47,18 @@
   <div class="content">
     {{> status-bar}}
     <div id="trigger"><p class="loading">Loading...</p></div>
+  </div>
+
+  <div class="overlay" id="spam-groups-popup">
+    <div class="modal">
+      <h4>Choose groups</h4>
+      <input type="text" id="spam-groups-filter" placeholder="Filter by name...">
+      <div class="list" id="spam-groups-list"></div>
+      <div class="actions">
+        <button type="button" class="btn" id="spam-groups-cancel">Cancel</button>
+        <button type="button" class="btn btn-green" id="spam-groups-done">Done</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -107,8 +129,130 @@
       };
     }
 
+    // Spam form. The chosen watched groups live in spamPicked; the popup edits a copy
+    let spamPicked = new Set();
+    let spamDraft = new Set();
+    let spamCovered = [];
+
+    function spamForm(cfg, type, groups, groupNames) {
+      spamCovered = groups;
+      spamPicked = new Set(cfg.groupJids);
+      const chk = (id, on, label) => '<label><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '> ' + label + '</label>';
+      const radio = (name, value, cur, label) => '<label><input type="radio" name="' + name + '" value="' + value + '"' + (cur === value ? ' checked' : '') + '> ' + label + '</label>';
+      let reportOptions = groups.map(g => '<option value="' + esc(g.jid) + '"' + (g.jid === cfg.reportGroupJid ? ' selected' : '') + '>'
+        + esc(g.name) + (g.botMembership === 'none' ? ' (bot left this group)' : '') + '</option>').join('');
+      if (cfg.reportGroupJid && !groups.some(g => g.jid === cfg.reportGroupJid)) {
+        reportOptions = '<option value="' + esc(cfg.reportGroupJid) + '" selected disabled>'
+          + esc(groupNames[cfg.reportGroupJid] || cfg.reportGroupJid) + ' (not in this tenant)</option>' + reportOptions;
+      }
+      return '<p class="muted" style="margin:.3rem 0">Event: a new message in a watched group</p>'
+        + '<div class="row" style="margin-bottom:1rem;font-size:.85rem"><label><input type="checkbox" id="f-only-first"' + (cfg.onlyIfFirst ? ' checked' : '') + '> Only if no earlier trigger fired for this event</label></div>'
+        + '<div class="field"><label for="f-name">Name</label><input type="text" id="f-name" style="width:260px" maxlength="100"></div>'
+        + '<div class="field"><label>Watched groups</label><div class="box">'
+        + '<div class="row">' + radio('s-mode', 'all', cfg.groupsMode, 'All groups of this tenant')
+        + radio('s-mode', 'only', cfg.groupsMode, 'Only the selected groups')
+        + radio('s-mode', 'except', cfg.groupsMode, 'All groups except the selected ones') + '</div>'
+        + '<div class="row" id="s-pick-row"><button type="button" class="btn" id="s-pick">Choose groups...</button><span class="muted" id="s-pick-count"></span></div>'
+        + '<div class="row"><span>Bot role in the group:</span>'
+        + '<select id="s-bot-role"><option value="any">Any</option><option value="admin">Admin</option><option value="not_admin">Not an admin</option></select>'
+        + '<span class="muted">Checked when the message arrives</span></div></div></div>'
+        + '<div class="field"><label>Conditions (all of these must be true)</label><div class="box">'
+        + '<div>' + chk('s-content', cfg.contentEnabled, 'The message content matches') + ' <span class="muted">(any one of these is enough)</span>'
+        + '<div style="margin-left:1.4rem">'
+        + '<div>' + chk('s-link', cfg.contentLink, 'It has a link') + '</div>'
+        + '<div>' + chk('s-image', cfg.contentImage, 'It has an image') + '</div>'
+        + '<div>The text matches this pattern (regex): <input type="text" id="s-regex" style="width:220px" maxlength="200"></div>'
+        + '</div></div>'
+        + '<div>' + chk('s-not-admin', cfg.senderNotAdmin, 'The sender is not an admin') + '</div>'
+        + '<div><label><input type="checkbox" id="s-joined-on"' + (cfg.joinedWithinDays !== null ? ' checked' : '') + '> The sender joined less than</label> '
+        + '<input type="number" id="s-joined" min="1" max="3650" value="' + esc(cfg.joinedWithinDays !== null ? cfg.joinedWithinDays : 7) + '"> days ago</div>'
+        + '<div><label><input type="checkbox" id="s-max-on"' + (cfg.maxMessages !== null ? ' checked' : '') + '> The sender has fewer than</label> '
+        + '<input type="number" id="s-max" min="1" max="10000" value="' + esc(cfg.maxMessages !== null ? cfg.maxMessages : 5) + '"> messages in this group</div>'
+        + '</div></div>'
+        + '<div class="field"><label>Timing</label><div class="row" style="font-size:.85rem">'
+        + 'Wait <input type="number" id="f-wait" min="0" value="' + esc(cfg.waitSeconds) + '"> seconds before processing &nbsp;&middot;&nbsp; '
+        + 'Ignore events older than <input type="number" id="f-age" min="1" value="' + esc(cfg.maxAgeMinutes) + '"> minutes</div></div>'
+        + '<div class="field"><label for="f-prompt">Prompt <span class="lnk" id="toggle-default" onclick="toggleDefault()">Show default</span></label>'
+        + '<div class="default-box" id="default-box"></div>'
+        + '<textarea id="f-prompt" rows="3" placeholder="Empty: use the default prompt for ' + esc(type.displayName) + '"></textarea>'
+        + '<div class="muted" style="margin-top:.25rem">Placeholders: <code>{{group}}</code> <code>{{user}}</code> <code>{{message}}</code> <code>{{timezone}}</code> <code>{{botlid}}</code></div></div>'
+        + '<div class="field"><label for="f-instructions">Additional instructions (added after the prompt)</label>'
+        + '<textarea id="f-instructions" rows="3" placeholder="e.g. Ads for local shops are fine."></textarea></div>'
+        + '<div class="field"><label>Actions</label><div class="box"><div class="row">'
+        + '<label for="s-report">Post reports and errors to:</label>'
+        + '<select id="s-report" style="width:300px"><option value="">Choose a group...</option>' + reportOptions + '</select></div></div></div>'
+        + '<div class="field"><label for="f-error">Error message (posted in the group above)</label>'
+        + '<textarea id="f-error" rows="2" placeholder="Empty: ' + esc(type.defaultErrorTemplate) + '"></textarea>'
+        + '<div class="muted" style="margin-top:.25rem">Placeholders: <code>{{error}}</code> <code>{{trigger}}</code> <code>{{group}}</code> <code>{{user}}</code> <code>{{message}}</code></div></div>';
+    }
+
+    // Runs after the form is in the page: sets values that need no escaping and wires the popup
+    function spamAfterDraw(cfg) {
+      document.getElementById('s-regex').value = cfg.contentRegex;
+      document.getElementById('s-bot-role').value = cfg.botRole;
+      const refresh = () => {
+        const mode = document.querySelector('input[name="s-mode"]:checked').value;
+        document.getElementById('s-pick-row').style.display = mode === 'all' ? 'none' : '';
+        const n = spamPicked.size;
+        document.getElementById('s-pick-count').textContent = n + (n === 1 ? ' group chosen' : ' groups chosen');
+      };
+      document.querySelectorAll('input[name="s-mode"]').forEach(r => r.addEventListener('change', refresh));
+      document.getElementById('s-pick').addEventListener('click', () => {
+        spamDraft = new Set(spamPicked);
+        document.getElementById('spam-groups-filter').value = '';
+        renderSpamGroups();
+        document.getElementById('spam-groups-popup').classList.add('open');
+      });
+      document.getElementById('spam-groups-filter').oninput = renderSpamGroups;
+      document.getElementById('spam-groups-cancel').onclick = () => document.getElementById('spam-groups-popup').classList.remove('open');
+      document.getElementById('spam-groups-done').onclick = () => {
+        spamPicked = new Set(spamDraft);
+        document.getElementById('spam-groups-popup').classList.remove('open');
+        refresh();
+      };
+      document.getElementById('spam-groups-list').onchange = e => {
+        const jid = e.target.getAttribute('data-jid');
+        if (e.target.checked) spamDraft.add(jid); else spamDraft.delete(jid);
+      };
+      refresh();
+    }
+
+    function renderSpamGroups() {
+      const filter = document.getElementById('spam-groups-filter').value.trim().toLowerCase();
+      const html = spamCovered.filter(g => !filter || g.name.toLowerCase().includes(filter)).map(g =>
+        '<div><label><input type="checkbox" data-jid="' + esc(g.jid) + '"' + (spamDraft.has(g.jid) ? ' checked' : '') + '> ' + esc(g.name) + '</label></div>').join('');
+      document.getElementById('spam-groups-list').innerHTML = html || '<span class="muted">No groups found.</span>';
+    }
+
+    function readSpamConfig() {
+      const val = id => document.getElementById(id).value;
+      const on = id => document.getElementById(id).checked;
+      return {
+        groupsMode: document.querySelector('input[name="s-mode"]:checked').value,
+        groupJids: [...spamPicked],
+        botRole: val('s-bot-role'),
+        contentEnabled: on('s-content'),
+        contentLink: on('s-link'),
+        contentImage: on('s-image'),
+        contentRegex: val('s-regex'),
+        senderNotAdmin: on('s-not-admin'),
+        joinedWithinDays: on('s-joined-on') ? Number(val('s-joined')) : null,
+        maxMessages: on('s-max-on') ? Number(val('s-max')) : null,
+        reportGroupJid: val('s-report'),
+        onlyIfFirst: on('f-only-first'),
+        waitSeconds: Number(val('f-wait')),
+        maxAgeMinutes: Number(val('f-age')),
+        prompt: val('f-prompt'),
+        instructions: val('f-instructions'),
+        errorTemplate: val('f-error'),
+      };
+    }
+
     // One entry per trigger type: how to draw its form and read it back
-    const forms = { qa: { draw: qaForm, read: readQaConfig } };
+    const forms = {
+      qa: { draw: qaForm, read: readQaConfig },
+      spam: { draw: spamForm, read: readSpamConfig, after: spamAfterDraw },
+    };
 
     function render() {
       const type = data.type;
@@ -139,6 +283,7 @@
       document.getElementById('f-instructions').value = cfg.instructions;
       document.getElementById('f-error').value = cfg.errorTemplate;
       document.getElementById('default-box').textContent = type.defaultPrompt;
+      if (form.after) form.after(cfg);
     }
 
     function toggleDefault() {

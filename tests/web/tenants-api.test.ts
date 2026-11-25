@@ -9,6 +9,7 @@ import { listTriggers, getTrigger } from '../../src/db/queries/triggers.js'
 import { getAccountDb } from '../../src/db/account.js'
 import { tenantGroups } from '../../src/db/schema.js'
 import { getTenant } from '../../src/db/queries/tenants.js'
+import { DEFAULT_SPAM_PROMPT, SPAM_DEFAULT_ERROR_TEMPLATE, SPAM_TRIGGER_DEFAULTS } from '../../src/triggers/spam/defaults.js'
 import { DEFAULT_QA_SYSTEM_PROMPT, QA_DEFAULT_ERROR_TEMPLATE } from '../../src/triggers/qa/defaults.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
@@ -193,6 +194,43 @@ describe('tenants api', () => {
     expect(getTrigger(id)).toBeNull()
     expect((await call('GET', `/api/triggers/${id}`)).statusCode).toBe(404)
     expect((await call('DELETE', `/api/triggers/${id}`)).statusCode).toBe(404)
+  })
+
+  it('creates and updates a Spam trigger, and describes the Spam type', async () => {
+    seedGroup('a@g.us', 'A')
+    seedGroup('b@g.us', 'B')
+    const t = seedTenant('One', ['a@g.us', 'b@g.us'])
+    const type = (await call('GET', `/api/trigger-types/spam?tenant=${t}`)).json()
+    expect(type.type).toMatchObject({ id: 'spam', displayName: 'Spam', defaultPrompt: DEFAULT_SPAM_PROMPT, defaultErrorTemplate: SPAM_DEFAULT_ERROR_TEMPLATE })
+    expect(type.coveredGroups.map((g: { jid: string }) => g.jid)).toEqual(['a@g.us', 'b@g.us'])
+    const config = {
+      ...SPAM_TRIGGER_DEFAULTS, groupsMode: 'only', groupJids: ['a@g.us'], reportGroupJid: 'b@g.us',
+      contentRegex: 'free\\s+money', joinedWithinDays: 7, maxMessages: null, prompt: '', errorTemplate: '',
+    }
+    const created = await call('POST', `/api/tenants/${t}/triggers`, { type: 'spam', name: 'Spam', enabled: true, config })
+    expect(created.statusCode).toBe(200)
+    const id = created.json().id as number
+    expect(getTrigger(id)!.config).toMatchObject({ groupsMode: 'only', groupJids: ['a@g.us'], reportGroupJid: 'b@g.us', joinedWithinDays: 7, maxMessages: null, prompt: '' })
+    const upd = await call('PUT', `/api/triggers/${id}`, { name: 'Spam 2', enabled: true, config: { ...config, groupsMode: 'all', groupJids: [], botRole: 'admin', joinedWithinDays: null, maxMessages: 5 } })
+    expect(upd.json()).toEqual({ ok: true })
+    expect(getTrigger(id)!.config).toMatchObject({ groupsMode: 'all', botRole: 'admin', joinedWithinDays: null, maxMessages: 5 })
+  })
+
+  it('rejects a bad Spam config with the validate message', async () => {
+    seedGroup('a@g.us', 'A')
+    seedGroup('out@g.us', 'Out')
+    const t = seedTenant('One', ['a@g.us'])
+    const config = { ...SPAM_TRIGGER_DEFAULTS, reportGroupJid: 'a@g.us' }
+    const post = (c: object) => call('POST', `/api/tenants/${t}/triggers`, { type: 'spam', name: 'S', enabled: true, config: c })
+    const badRegex = await post({ ...config, contentRegex: '(' })
+    expect(badRegex.statusCode).toBe(400)
+    expect(badRegex.json().error).toBe('The text pattern is not valid')
+    const outside = await post({ ...config, reportGroupJid: 'out@g.us' })
+    expect(outside.statusCode).toBe(400)
+    expect(outside.json().error).toBe('Choose a notification group in this tenant')
+    const noGroups = await post({ ...config, groupsMode: 'only', groupJids: [] })
+    expect(noGroups.json().error).toBe('Pick at least one group')
+    expect(listTriggers(t)).toEqual([])
   })
 
   it('lists covered groups by name with the bot membership, and names a Q&A group outside the tenant', async () => {

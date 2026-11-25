@@ -31,11 +31,18 @@ describe('tenants pages', () => {
   })
 
   it('serves the trigger form for a new and an existing trigger', async () => {
-    for (const url of ['/tenants/1/triggers/new?type=qa', '/tenants/1/triggers/2']) {
+    for (const url of ['/tenants/1/triggers/new?type=qa', '/tenants/1/triggers/new?type=spam', '/tenants/1/triggers/2']) {
       const res = await app.inject({ method: 'GET', url, headers: { cookie: auth.cookie } })
       expect(res.statusCode).toBe(200)
       expect(res.body).toContain('id="trigger-form"')
     }
+  })
+
+  it('the trigger page has a Spam form with the groups popup', async () => {
+    const res = await app.inject({ method: 'GET', url: '/tenants/1/triggers/new?type=spam', headers: { cookie: auth.cookie } })
+    expect(res.body).toContain('draw: spamForm, read: readSpamConfig')
+    expect(res.body).toContain('id="spam-groups-popup"')
+    expect(res.body).toContain('Post reports and errors to')
   })
 
   it('redirects both pages to /login when unauthenticated', async () => {
