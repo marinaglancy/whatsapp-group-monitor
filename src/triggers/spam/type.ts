@@ -25,11 +25,13 @@ const PROMPT_MAX = 20_000
 const INSTRUCTIONS_MAX = 4_000
 const ERROR_TEMPLATE_MAX = 1_000
 
-const LINK_RE = /https?:\/\/|www\.|(?:[a-z0-9-]+\.)+[a-z]{2,}\//i
+const LINK_RE = /https?:\/\/|\bwww\.[a-z0-9]|\b(?:[a-z0-9-]{1,63}\.){1,10}[a-z]{2,24}\//i
+/** A group that already repeats something inside, repeated again, like (a+)+: can take forever. */
+const SLOW_REGEX_RE = /\([^)]*(?:[+*]|\{\d+,\d*\})[^)]*\)(?:[+*]|\{\d+,\d*\})/
 
 /** Whether the text has a web link: http(s)://, www., or a domain followed by a slash. */
 export function hasLink(text: string): boolean {
-  return LINK_RE.test(text)
+  return LINK_RE.test(text.slice(0, SPAM_TEXT_SCAN_MAX))
 }
 
 function textOf(event: TriggerEvent): string {
@@ -110,6 +112,9 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
     if (typeof c.contentRegex !== 'string') return fail('Invalid text pattern')
     if (c.contentRegex.length > SPAM_REGEX_MAX) return fail(`The text pattern can be at most ${SPAM_REGEX_MAX} characters`)
     if (c.contentRegex && !compileRegex(c.contentRegex)) return fail('The text pattern is not valid')
+    if (SLOW_REGEX_RE.test(c.contentRegex)) {
+      return fail('This pattern can be very slow. Avoid repeating a group that already repeats, like (a+)+.')
+    }
     if (c.contentEnabled && !c.contentLink && !c.contentImage && !c.contentRegex) {
       return fail('Choose at least one kind of content to check')
     }

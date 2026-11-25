@@ -49,8 +49,20 @@ describe('hasLink', () => {
     expect(hasLink('chat.whatsapp.com/Abc')).toBe(true)
   })
   it('ignores plain text', () => {
-    expect(hasLink('see you at 5.30')).toBe(false)
+    for (const t of ['e.g. this', 'i.e. that', 'photo.jpg', 'Mr.Smith', 'Awww. so cute', '5.30.', 'see you at 5.30']) {
+      expect(hasLink(t)).toBe(false)
+    }
     expect(hasLink('hello world. Bye')).toBe(false)
+  })
+})
+
+describe('hasLink speed', () => {
+  it('checks very long messages quickly', () => {
+    for (const t of ['a'.repeat(65_000), 'a.'.repeat(32_000)]) {
+      const start = performance.now()
+      hasLink(t)
+      expect(performance.now() - start).toBeLessThan(50)
+    }
   })
 })
 
@@ -107,8 +119,9 @@ describe('Spam trigger type', () => {
 
   it('an invalid or too long stored regex never throws or matches', () => {
     seedSpamTrigger(tenantId, 'rep@g.us', { config: { contentLink: false, contentImage: false, contentRegex: '(' } })
-    seedSpamTrigger(tenantId, 'rep@g.us', { config: { contentLink: false, contentImage: false, contentRegex: 'a'.repeat(SPAM_REGEX_MAX + 1) } })
     expect(run(record({ metadata: { text: 'aaa (' } }))).toEqual([])
+    seedSpamTrigger(tenantId, 'rep@g.us', { config: { contentLink: false, contentImage: false, contentRegex: 'a'.repeat(SPAM_REGEX_MAX + 1) } })
+    expect(run(record({ metadata: { text: 'a'.repeat(300) } }))).toEqual([])
   })
 
   it('watches by groups mode', () => {
@@ -183,6 +196,13 @@ describe('Spam trigger type', () => {
     expect(ok('a'.repeat(SPAM_REGEX_MAX + 1))).toBe(false)
     expect(ok('(')).toBe(false)
     expect(ok('[a-')).toBe(false)
+  })
+
+  it('validate refuses a repeated group that already repeats', () => {
+    const ctx = { coveredGroupJids: ['rep@g.us'] }
+    const ok = (contentRegex: string) => spamTriggerType.validate({ reportGroupJid: 'rep@g.us', contentRegex }, ctx).ok
+    for (const p of ['(a+)+$', '(\\w*)*', '(x+){2,}']) expect(ok(p)).toBe(false)
+    for (const p of ['(spam|scam)', '\\d+', '(abc)+']) expect(ok(p)).toBe(true)
   })
 
   it('normalize fills the defaults', () => {
