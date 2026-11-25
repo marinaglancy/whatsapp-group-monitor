@@ -1,6 +1,7 @@
 import { sql, type SQL } from 'drizzle-orm'
 import { ftsTextSqlExpr } from '../fts-expr.js'
 import { getAccountDb } from '../account.js'
+import { hasLink } from '../../utils/text.js'
 
 /** Typed query layer behind the Q&A tools. Everything here speaks unix seconds
  *  and raw jids; the executor layer converts to/from the model-visible
@@ -33,7 +34,7 @@ export function qDataSince(groupJids: string[]): Map<string, number> {
 const PRIMARY = ['message', 'poll_create', 'event_create'] as const
 const SECONDARY = ['reaction', 'poll_vote', 'event_response'] as const
 
-function inList(values: readonly string[]): SQL {
+function inList(values: readonly (string | number)[]): SQL {
   return sql.join(values.map(v => sql`${v}`), sql`, `)
 }
 
@@ -215,6 +216,47 @@ export function mediaIndication(metadata: Record<string, unknown> | null, raw: R
   }
 }
 
+/** Child rows (edits, reactions, votes, responses, deletes) of the given
+ *  messages, of the given types, id-ordered and keyed `${group_jid}|${parent_id}`. */
+function childRowsByParent(jids: string[], messageIds: string[], eventTypes: readonly string[]): Map<string, Record<string, unknown>[]> {
+  const byParent = new Map<string, Record<string, unknown>[]>()
+  if (!messageIds.length) return byParent
+  const children = getAccountDb().all<Record<string, unknown>>(sql`
+    SELECT id, group_jid, user_jid, message_id, parent_id, event_type, metadata, timestamp
+    FROM group_activity_log
+    WHERE group_jid IN (${inList(jids)}) AND parent_id IN (${inList(messageIds)})
+      AND event_type IN (${inList(eventTypes)})
+    ORDER BY id`)
+  for (const c of children) {
+    const key = `${c.group_jid}|${c.parent_id}`
+    if (!byParent.has(key)) byParent.set(key, [])
+    byParent.get(key)!.push(c)
+  }
+  return byParent
+}
+
+/** A message's final text (the last edit with text wins) and whether it was
+ *  deleted and by whom (the first delete; an admin can delete someone else's
+ *  message), from its id-ordered child rows. */
+function finalState(meta: Record<string, unknown>, kids: Record<string, unknown>[]): {
+  text: string | null; edited: boolean; deleted: boolean; deletedBy?: string
+} {
+  let text = (meta.text as string | undefined) ?? null
+  let edited = false
+  let deleted = false
+  let deletedBy: string | undefined
+  for (const c of kids) {
+    if (c.event_type === 'edit') {
+      const t = parseJson<Record<string, unknown>>(c.metadata)?.text as string | undefined
+      if (t) { text = t; edited = true }
+    } else if (c.event_type === 'delete' && !deleted) {
+      deleted = true
+      deletedBy = c.user_jid as string
+    }
+  }
+  return { text, edited, deleted, deletedBy }
+}
+
 export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
   groupJids?: string[]
   from: number
@@ -281,21 +323,8 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
     ORDER BY base.timestamp ${dir}, base.id ${dir}
     LIMIT ${opts.limit} OFFSET ${opts.offset}`)
 
-  const ids = rows.map(r => r.message_id as string)
-  const children = ids.length
-    ? db.all<Record<string, unknown>>(sql`
-        SELECT id, group_jid, user_jid, message_id, parent_id, event_type, metadata, timestamp
-        FROM group_activity_log
-        WHERE group_jid IN (${inList(jids)}) AND parent_id IN (${inList(ids)})
-          AND event_type IN ('edit', 'reaction', 'poll_vote', 'event_response', 'delete')
-        ORDER BY id`)
-    : []
-  const childByParent = new Map<string, Record<string, unknown>[]>()
-  for (const c of children) {
-    const key = `${c.group_jid}|${c.parent_id}`
-    if (!childByParent.has(key)) childByParent.set(key, [])
-    childByParent.get(key)!.push(c)
-  }
+  const childByParent = childRowsByParent(jids, rows.map(r => r.message_id as string),
+    ['edit', 'reaction', 'poll_vote', 'event_response', 'delete'])
 
   const messages: QaMessageRow[] = rows.map(r => {
     const meta = parseJson<Record<string, unknown>>(r.metadata) ?? {}
@@ -303,23 +332,15 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
     const kind = KIND_BY_BASE_TYPE[r.event_type as string]
     const kids = childByParent.get(`${r.group_jid}|${r.message_id}`) ?? []
 
-    let text = (meta.text as string | undefined) ?? null
-    let edited = false
+    const { text, edited, deleted, deletedBy } = finalState(meta, kids)
     // per-user LAST reaction (children are id-ordered): null/empty = removed
     const reactionByUser = new Map<string, string | null>()
     const votesByUser = new Map<string, string[]>()
     const responseByUser = new Map<string, string>()
-    let deleted = false
-    let deletedBy: string | undefined
 
     for (const c of kids) {
       const cmeta = parseJson<Record<string, unknown>>(c.metadata) ?? {}
       switch (c.event_type) {
-        case 'edit': {
-          const t = cmeta.text as string | undefined
-          if (t) { text = t; edited = true }
-          break
-        }
         case 'reaction':
           reactionByUser.set(c.user_jid as string, (cmeta.emoji as string | null) || null)
           break
@@ -328,9 +349,6 @@ export function qGroupMessages(ctx: QaToolQueryCtx, opts: {
           break
         case 'event_response':
           if (cmeta.response) responseByUser.set(c.user_jid as string, cmeta.response as string)
-          break
-        case 'delete':
-          if (!deleted) { deleted = true; deletedBy = c.user_jid as string }
           break
       }
     }
@@ -570,19 +588,58 @@ export function buildFtsMatch(query: string[]): string | null {
   return groups.length ? groups.join(' OR ') : null
 }
 
+/** The stored contentType behind each media kind message_search can filter
+ *  on. SQL narrows by it; mediaIndication confirms (it tells a voice message
+ *  from other audio). */
+const CONTENT_TYPE_BY_MEDIA: Record<string, string> = {
+  image: 'imageMessage',
+  video: 'videoMessage',
+  sticker: 'stickerMessage',
+  'voice message': 'audioMessage',
+  audio: 'audioMessage',
+  document: 'documentMessage',
+  location: 'locationMessage',
+  contact: 'contactMessage',
+}
+export const SEARCH_MEDIA_KINDS = Object.keys(CONTENT_TYPE_BY_MEDIA)
+
+/** The media kind a mediaIndication value falls under: 'document: x.pdf' is a document. */
+function mediaKind(indication: string): string {
+  return indication.startsWith('document: ') ? 'document' : indication
+}
+
+/** The final text of message row t in SQL, as finalState computes it: the last
+ *  edit with text, else the original text. */
+const FINAL_TEXT_SQL = sql`coalesce(
+  (SELECT json_extract(e.metadata, '$.text') FROM group_activity_log e
+   WHERE e.group_jid = t.group_jid AND e.parent_id = t.message_id AND e.event_type = 'edit'
+     AND coalesce(json_extract(e.metadata, '$.text'), '') <> ''
+   ORDER BY e.id DESC LIMIT 1),
+  json_extract(t.metadata, '$.text'))`
+
 export interface QaSearchHit {
   messageId: string
   groupJid: string
   authorLid: string
   timestamp: number
   type: 'message' | 'poll' | 'event'
-  snippet: string
+  /** Around the query match; for a hit found only by link or media, the start
+   *  of its text; null when it has no text. */
+  snippet: string | null
+  media: string | null
+  deleted?: boolean
+  deletedBy?: string
 }
 
+/** query, hasLink and media are alternatives combined with OR; the other
+ *  filters apply to all of them. */
 export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
   groupJids?: string[]
-  query: string[]
+  query?: string[]
+  hasLink?: boolean
+  media?: string[]
   authorLid?: string
+  includeDeleted?: boolean
   from: number
   to: number
   order: 'asc' | 'desc'
@@ -592,44 +649,101 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
   const db = getAccountDb()
   const jids = opts.groupJids?.length ? opts.groupJids : ctx.groupJids
   if (jids.length === 0) return { hits: [], total: 0 }
-  const match = buildFtsMatch(opts.query)
-  if (!match) return { hits: [], total: 0 }
+  const query = opts.query ?? []
+  const match = buildFtsMatch(query)
+  const media = opts.media ?? []
+  if (!match && !opts.hasLink && !media.length) return { hits: [], total: 0 }
 
+  // filters on the message row t that every alternative shares
   const authorCond = opts.authorLid ? sql` AND t.user_jid = ${opts.authorLid}` : sql``
-  const dir = opts.order === 'desc' ? sql`DESC` : sql`ASC`
-  const joins = sql`
+  const deletedCond = opts.includeDeleted ? sql`` : sql`
+      AND NOT EXISTS (SELECT 1 FROM group_activity_log del
+        WHERE del.group_jid = t.group_jid AND del.parent_id = t.message_id AND del.event_type = 'delete')`
+  const scope = sql`t.group_jid IN (${inList(jids)})
+      AND t.timestamp BETWEEN ${opts.from} AND ${opts.to}${authorCond}${deletedCond}`
+  const ftsFrom = (m: string) => sql`
     FROM messages_fts f
     JOIN group_activity_log h ON h.id = f.rowid
     JOIN group_activity_log t
       ON t.group_jid = h.group_jid
      AND t.message_id = CASE WHEN h.event_type = 'edit' THEN h.parent_id ELSE h.message_id END
      AND t.event_type IN ('message', 'poll_create', 'event_create')
-    WHERE messages_fts MATCH ${match}
-      AND t.group_jid IN (${inList(jids)})
-      AND t.timestamp BETWEEN ${opts.from} AND ${opts.to}${authorCond}
-      AND NOT EXISTS (SELECT 1 FROM group_activity_log del
-        WHERE del.group_jid = t.group_jid AND del.parent_id = t.message_id AND del.event_type = 'delete')`
+    WHERE messages_fts MATCH ${m} AND ${scope}`
 
-  const total = db.get<{ cnt: number }>(sql`SELECT count(DISTINCT t.id) AS cnt ${joins}`)?.cnt ?? 0
+  // message row id -> sent_at, for every message that matches any alternative
+  const found = new Map<number, number>()
+  const queryMatched = new Set<number>()
+  if (match) {
+    for (const r of db.all<{ id: number; ts: number }>(sql`SELECT DISTINCT t.id AS id, t.timestamp AS ts ${ftsFrom(match)}`)) {
+      found.set(r.id, r.ts)
+      queryMatched.add(r.id)
+    }
+  }
+  if (opts.hasLink) {
+    // every link has a slash or www.; hasLink then checks properly
+    const rows = db.all<{ id: number; ts: number; txt: string }>(sql`
+      SELECT id, ts, txt FROM (
+        SELECT t.id AS id, t.timestamp AS ts, ${FINAL_TEXT_SQL} AS txt
+        FROM group_activity_log t
+        WHERE t.event_type = 'message' AND ${scope}
+      ) WHERE txt LIKE '%/%' OR txt LIKE '%www.%'`)
+    for (const r of rows) if (hasLink(r.txt)) found.set(r.id, r.ts)
+  }
+  if (media.length) {
+    const contentTypes = [...new Set(media.map(m => CONTENT_TYPE_BY_MEDIA[m]).filter(Boolean))]
+    // raw is only needed to tell a voice message from other audio
+    const rows = db.all<{ id: number; ts: number; metadata: unknown; raw: unknown }>(sql`
+      SELECT t.id AS id, t.timestamp AS ts, t.metadata AS metadata,
+             CASE WHEN json_extract(t.metadata, '$.contentType') = 'audioMessage' THEN t.raw END AS raw
+      FROM group_activity_log t
+      WHERE t.event_type = 'message'
+        AND json_extract(t.metadata, '$.contentType') IN (${inList(contentTypes)}) AND ${scope}`)
+    for (const r of rows) {
+      const indication = mediaIndication(parseJson(r.metadata), parseJson(r.raw))
+      if (indication && media.includes(mediaKind(indication))) found.set(r.id, r.ts)
+    }
+  }
+
+  const sign = opts.order === 'desc' ? -1 : 1
+  const ordered = [...found].sort((a, b) => sign * (a[1] - b[1] || a[0] - b[0])).map(([id]) => id)
+  const total = ordered.length
+  const pageIds = ordered.slice(opts.offset, opts.offset + opts.limit)
+  if (!pageIds.length) return { hits: [], total }
+
   const rows = db.all<Record<string, unknown>>(sql`
-    SELECT t.message_id AS message_id, t.group_jid AS group_jid, t.user_jid AS user_jid, t.timestamp AS ts,
-           t.event_type AS etype, ${sql.raw(ftsTextSqlExpr('h.'))} AS hit_text
-    ${joins}
-    GROUP BY t.id
-    ORDER BY t.timestamp ${dir}, t.id ${dir}
-    LIMIT ${opts.limit} OFFSET ${opts.offset}`)
+    SELECT id, group_jid, user_jid, message_id, event_type, metadata, raw, timestamp
+    FROM group_activity_log WHERE id IN (${inList(pageIds)})`)
+  const rowById = new Map(rows.map(r => [r.id as number, r]))
+  // snippets around a query match come from the text that matched (it may be an edit)
+  const hitTextById = new Map<number, string>()
+  const queryPage = pageIds.filter(id => queryMatched.has(id))
+  if (match && queryPage.length) {
+    const hitRows = db.all<{ id: number; hit_text: string | null }>(sql`
+      SELECT t.id AS id, ${sql.raw(ftsTextSqlExpr('h.'))} AS hit_text
+      ${ftsFrom(match)} AND t.id IN (${inList(queryPage)})
+      GROUP BY t.id`)
+    for (const r of hitRows) hitTextById.set(r.id, r.hit_text ?? '')
+  }
+  const kidsByParent = childRowsByParent(jids, rows.map(r => r.message_id as string), ['edit', 'delete'])
 
-  return {
-    hits: rows.map(r => ({
+  const hits = pageIds.map((id): QaSearchHit => {
+    const r = rowById.get(id)!
+    const meta = parseJson<Record<string, unknown>>(r.metadata) ?? {}
+    const kind = KIND_BY_BASE_TYPE[r.event_type as string]
+    const { text, deleted, deletedBy } = finalState(meta, kidsByParent.get(`${r.group_jid}|${r.message_id}`) ?? [])
+    const hitText = hitTextById.get(id)
+    return {
       messageId: r.message_id as string,
       groupJid: r.group_jid as string,
       authorLid: r.user_jid as string,
-      timestamp: r.ts as number,
-      type: KIND_BY_BASE_TYPE[r.etype as string],
-      snippet: makeSnippet((r.hit_text as string | null) ?? '', opts.query),
-    })),
-    total,
-  }
+      timestamp: r.timestamp as number,
+      type: kind,
+      snippet: hitText !== undefined ? makeSnippet(hitText, query) : text ? makeSnippet(text, []) : null,
+      media: kind === 'message' ? mediaIndication(meta, parseJson(r.raw)) : null,
+      ...(deleted ? { deleted: true, deletedBy } : {}),
+    }
+  })
+  return { hits, total }
 }
 
 /** Short excerpt around the first matched term (SQL snippet() misbehaves once

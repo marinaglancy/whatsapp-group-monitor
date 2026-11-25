@@ -798,7 +798,7 @@
   {
     "name": "message_search",
     "_category": "group",
-    "description": "Find where something was discussed by searching message texts. To read the surrounding conversation, call group_messages with from set to a hit's sent_at and order asc.",
+    "description": "Find where something was discussed by searching message texts, or find messages with links or media. query, has_link and media are alternatives combined with OR: a message is a hit when it matches any of the ones given, and at least one of them is required. group_jids, author_lid, from/to and include_deleted always apply. To read the surrounding conversation, call group_messages with from set to a hit's sent_at and order asc.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -807,7 +807,28 @@
           "items": {
             "type": "string"
           },
-          "description": "Search alternatives, combined with OR: a message matches when it satisfies at least one entry. Within an entry ALL words must appear (AND), in any order; wrap words in \"double quotes\" to require an exact phrase. Example: [\"picnic saturday\", \"\\\"beach volleyball\\\"\"] finds messages with both picnic and saturday, or the exact phrase beach volleyball."
+          "description": "Search alternatives, combined with OR: a message matches when it satisfies at least one entry. Within an entry ALL words must appear (AND), in any order; wrap words in \"double quotes\" to require an exact phrase. Example: [\"picnic saturday\", \"\\\"beach volleyball\\\"\"] finds messages with both picnic and saturday, or the exact phrase beach volleyball. Optional when has_link or media is given; a message matches when it matches the query, has a link (has_link), or has one of the media kinds (media)."
+        },
+        "has_link": {
+          "type": "boolean",
+          "description": "Only messages whose text contains a link (http://, https://, www., or a domain followed by a path, e.g. bit.ly/x, chat.whatsapp.com/x)."
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "image",
+              "video",
+              "sticker",
+              "voice message",
+              "audio",
+              "document",
+              "location",
+              "contact"
+            ]
+          },
+          "description": "Only messages with this kind of content."
         },
         "group_jids": {
           "type": "array",
@@ -843,11 +864,12 @@
         "offset": {
           "type": "integer",
           "description": "Paging offset. Default 0."
+        },
+        "include_deleted": {
+          "type": "boolean",
+          "description": "Include deleted messages, marked with deleted/deleted_by and shown with their last known content. Useful when inspecting spam that admins already removed. Default false."
         }
-      },
-      "required": [
-        "query"
-      ]
+      }
     },
     "responseJsonSchema": {
       "type": "object",
@@ -897,7 +919,31 @@
               },
               "snippet": {
                 "type": "string",
-                "description": "Short excerpt around the match."
+                "description": "Short excerpt around the match. For a hit found only by has_link or media: the start of the message text. Absent when the message has no text (e.g. an image without a caption)."
+              },
+              "media": {
+                "type": "string",
+                "description": "Present when the message carried non-text content, e.g. 'image', 'video', 'sticker', 'voice message', 'audio', 'document: <filename>', 'location', 'live location', 'contact'. The media itself is never included; snippet carries the caption when there is one."
+              },
+              "deleted": {
+                "type": "boolean",
+                "description": "Present and true when the message was deleted (only returned when include_deleted is true)."
+              },
+              "deleted_by": {
+                "type": "object",
+                "description": "Who deleted the message; may differ from the author when an admin removed it.",
+                "properties": {
+                  "lid": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Display name when known; may be absent."
+                  }
+                },
+                "required": [
+                  "lid"
+                ]
               }
             },
             "required": [
@@ -905,7 +951,6 @@
               "group_jid",
               "group_name",
               "sent_at",
-              "snippet",
               "author",
               "type"
             ]

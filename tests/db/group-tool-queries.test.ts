@@ -267,6 +267,104 @@ describe('qSearchMessages', () => {
   })
 })
 
+describe('qSearchMessages links, media and deleted messages', () => {
+  const C = ['c@g.us']
+  const base = { from: 0, to: 100_000, order: 'asc' as const, limit: 20, offset: 0 }
+  type SearchOpts = Parameters<typeof qSearchMessages>[1]
+  const search = (opts: Partial<SearchOpts>, jids = C) => qSearchMessages({ groupJids: jids }, { ...base, ...opts })
+  const ids = (opts: Partial<SearchOpts>, jids = C) => search(opts, jids).hits.map(h => h.messageId)
+  const all3 = { query: ['football'], hasLink: true, media: ['image'] }
+
+  beforeEach(() => {
+    seedGroup('c@g.us', 'Gamma')
+    seedMessage('c@g.us', ANNA, 'join here bit.ly/x', 20_000, { messageId: 'L1' })
+    seedMessage('c@g.us', BORIS, '', 20_100, { messageId: 'I1', metadata: { contentType: 'imageMessage' } })
+    seedMessage('c@g.us', CARL, 'football tonight', 20_200, { messageId: 'W1' })
+    seedMessage('c@g.us', ANNA, 'nothing to see, e.g. at 5.30', 20_300, { messageId: 'N1' })
+  })
+
+  it('finds a message that matches the query, has a link or has the media kind', () => {
+    expect(ids(all3)).toEqual(['L1', 'I1', 'W1'])
+    expect(search(all3).total).toBe(3)
+  })
+
+  it('still restricts every alternative by author, group and date', () => {
+    expect(ids({ ...all3, authorLid: ANNA })).toEqual(['L1'])
+    expect(ids({ ...all3, from: 20_050, to: 20_150 })).toEqual(['I1'])
+    expect(ids(all3, A)).toEqual(['M3']) // Alpha has an image with a caption, no links, no football
+  })
+
+  it('has_link finds a bare domain with a path but not abbreviations or times', () => {
+    expect(ids({ hasLink: true })).toEqual(['L1'])
+  })
+
+  it('has_link uses the last edited text', () => {
+    seedMessage('c@g.us', ANNA, 'plain text', 21_000, { messageId: 'E1' })
+    seedMessage('c@g.us', ANNA, '', 21_010, { eventType: 'edit', parentId: 'E1', metadata: { contentType: 'conversation', text: 'now with https://spam.example' } })
+    seedMessage('c@g.us', ANNA, 'see chat.whatsapp.com/abc', 21_100, { messageId: 'E2' })
+    seedMessage('c@g.us', ANNA, '', 21_110, { eventType: 'edit', parentId: 'E2', metadata: { contentType: 'conversation', text: 'link removed' } })
+    expect(ids({ hasLink: true })).toEqual(['L1', 'E1'])
+  })
+
+  it('media finds an image with or without a caption; the snippet is the start of the caption', () => {
+    const caption = 'look at this view ' + 'x'.repeat(200)
+    seedMessage('c@g.us', CARL, caption, 22_000, { messageId: 'I2', metadata: { contentType: 'imageMessage', text: caption } })
+    const { hits, total } = search({ media: ['image'] })
+    expect(total).toBe(2)
+    expect(hits.map(h => h.messageId)).toEqual(['I1', 'I2'])
+    expect(hits[0].snippet).toBeNull()
+    expect(hits[0].media).toBe('image')
+    expect(hits[1].snippet).toBe(caption.slice(0, 100) + '…')
+  })
+
+  it('document matches any document file and shows its name', () => {
+    seedMessage('c@g.us', BORIS, '', 22_100, { messageId: 'D1', metadata: { contentType: 'documentMessage' }, raw: { message: { documentMessage: { fileName: 'x.pdf' } } } })
+    const { hits } = search({ media: ['document'] })
+    expect(hits.map(h => h.messageId)).toEqual(['D1'])
+    expect(hits[0].media).toBe('document: x.pdf')
+  })
+
+  it('tells a voice message from other audio', () => {
+    seedMessage('c@g.us', BORIS, '', 22_200, { messageId: 'V1', metadata: { contentType: 'audioMessage' }, raw: { message: { audioMessage: { ptt: true } } } })
+    seedMessage('c@g.us', BORIS, '', 22_300, { messageId: 'A1', metadata: { contentType: 'audioMessage' }, raw: { message: { audioMessage: {} } } })
+    expect(ids({ media: ['voice message'] })).toEqual(['V1'])
+    expect(ids({ media: ['audio'] })).toEqual(['A1'])
+    expect(ids({ media: ['voice message', 'audio'] })).toEqual(['V1', 'A1'])
+  })
+
+  it('a message matching several alternatives is one hit; snippets around a query match stay', () => {
+    const { hits, total } = search({ query: ['join'], hasLink: true })
+    expect(total).toBe(1)
+    expect(hits[0].messageId).toBe('L1')
+    expect(hits[0].snippet).toBe('join here bit.ly/x')
+    expect(hits[0].media).toBeNull()
+  })
+
+  it('pages the union in date order', () => {
+    const p1 = search({ ...all3, order: 'desc', limit: 2, offset: 0 })
+    const p2 = search({ ...all3, order: 'desc', limit: 2, offset: 2 })
+    expect(p1.total).toBe(3)
+    expect([...p1.hits, ...p2.hits].map(h => h.messageId)).toEqual(['W1', 'I1', 'L1'])
+  })
+
+  it('leaves deleted messages out unless asked, then says who deleted them', () => {
+    seedMessage('c@g.us', ANNA, 'buy now https://x.y', 23_000, { messageId: 'X1' })
+    seedMessage('c@g.us', BORIS, '', 23_100, { eventType: 'delete', parentId: 'X1' }) // an admin deletes Anna's message
+    expect(ids({ hasLink: true })).toEqual(['L1'])
+    const { hits } = search({ hasLink: true, includeDeleted: true })
+    expect(hits.map(h => h.messageId)).toEqual(['L1', 'X1'])
+    expect(hits[0].deleted).toBeUndefined()
+    expect(hits[1].deleted).toBe(true)
+    expect(hits[1].deletedBy).toBe(BORIS)
+    expect(hits[1].snippet).toBe('buy now https://x.y')
+    // the query alternative too
+    expect(ids({ query: ['"delete me"'] }, A)).toEqual([])
+    const m7 = search({ query: ['"delete me"'], includeDeleted: true }, A).hits
+    expect(m7.map(h => h.messageId)).toEqual(['M7'])
+    expect(m7[0].deletedBy).toBe(BORIS)
+  })
+})
+
 describe('qGroupMembers joined_at', () => {
   const base = { fields: new Set<string>(['joined_at', 'groups']), activityFrom: 0, activityTo: 10_000, filters: {}, includeLeft: true, orderBy: 'lid', order: 'asc' as const, limit: 50, offset: 0 }
   const EVE = 'eve@lid'

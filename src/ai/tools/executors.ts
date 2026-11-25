@@ -2,7 +2,7 @@ import { formatDateTime, parseDateTime } from '../../utils/time.js'
 import type { QaScope } from '../../bot/scope.js'
 import {
   qGroupMembers, qGroupMessages, qActivityStats, qSearchMessages, qUsersByJids, qFindUserJid,
-  type QaMemberFilters, type QaStatsRange,
+  SEARCH_MEDIA_KINDS, type QaMemberFilters, type QaStatsRange,
 } from '../../db/queries/group-tools.js'
 import { getAllGroups } from '../../db/queries/groups.js'
 import { logger } from '../../utils/logger.js'
@@ -99,6 +99,15 @@ function person(lid: string, users: UserInfo): string {
   const u = users.get(lid)
   const name = u?.name ? ` ${u.name}` : ''
   return `${bareId(lid)} ${u?.phone ?? '-'}${name}`
+}
+
+/** The deleted/deleted_by fields group_messages and message_search show. */
+function deletionFields(m: { deleted?: boolean; deletedBy?: string }, users: UserInfo): Record<string, unknown> {
+  if (!m.deleted) return {}
+  return {
+    deleted: true,
+    ...(m.deletedBy ? { deleted_by: { lid: m.deletedBy, ...(users.get(m.deletedBy)?.name ? { name: users.get(m.deletedBy)!.name } : {}) } } : {}),
+  }
 }
 
 /** Adaptive paging: keep up to `rows.length` rows but never exceed the byte budget. */
@@ -295,7 +304,7 @@ const executors: Record<string, Executor> = {
           not_going: m.event.responses.not_going.map(u => person(u, users)),
         },
       } } : {}),
-      ...(m.deleted ? { deleted: true, ...(m.deletedBy ? { deleted_by: { lid: m.deletedBy, ...(users.get(m.deletedBy)?.name ? { name: users.get(m.deletedBy)!.name } : {}) } } : {}) } : {}),
+      ...deletionFields(m, users),
     }))
     return paginate('messages', rows, total, offset)
   },
@@ -354,9 +363,22 @@ const executors: Record<string, Executor> = {
 
   message_search(args, ctx) {
     const now = (ctx.nowMs ?? (() => Date.now()))()
-    if (!Array.isArray(args.query) || args.query.length === 0 || (args.query as unknown[]).every(q => !String(q ?? '').trim())) {
-      throw new ToolError('query must be a non-empty array of search strings')
+    let query: string[] = []
+    if (args.query !== undefined && args.query !== null) {
+      if (!Array.isArray(args.query)) throw new ToolError('query must be an array of search strings')
+      query = (args.query as unknown[]).map(q => String(q ?? '')).filter(q => q.trim())
     }
+    const hasLink = args.has_link === true
+    let media: string[] = []
+    if (args.media !== undefined && args.media !== null) {
+      const allowed = `Allowed: ${SEARCH_MEDIA_KINDS.join(', ')}`
+      if (!Array.isArray(args.media)) throw new ToolError(`media must be an array of media kinds. ${allowed}`)
+      for (const m of args.media as unknown[]) {
+        if (!SEARCH_MEDIA_KINDS.includes(m as string)) throw new ToolError(`Unknown media '${m}'. ${allowed}`)
+      }
+      media = args.media as string[]
+    }
+    if (!query.length && !hasLink && !media.length) throw new ToolError('Give at least one of query, has_link or media.')
     const jids = resolveJids(args.group_jids, ctx.scope)
     let authorLid: string | undefined
     if (args.author_lid !== undefined) {
@@ -369,9 +391,16 @@ const executors: Record<string, Executor> = {
     const limit = clampLimit('message_search', args.limit)
     const offset = parseOffset(args.offset)
     const { hits, total } = qSearchMessages({ groupJids: jids }, {
-      query: (args.query as unknown[]).map(String), authorLid, from, to, order, limit, offset,
+      query, hasLink, media, authorLid,
+      includeDeleted: args.include_deleted === true,
+      from, to, order, limit, offset,
     })
-    const users = qUsersByJids([...new Set(hits.map(h => h.authorLid))])
+    const lids = new Set<string>()
+    for (const h of hits) {
+      lids.add(h.authorLid)
+      if (h.deletedBy) lids.add(h.deletedBy)
+    }
+    const users = qUsersByJids([...lids])
     const rows = hits.map(h => ({
       id: h.messageId,
       group_jid: h.groupJid,
@@ -379,7 +408,9 @@ const executors: Record<string, Executor> = {
       sent_at: formatDateTime(h.timestamp, ctx.timezone),
       author: { lid: h.authorLid, ...(users.get(h.authorLid)?.name ? { name: users.get(h.authorLid)!.name } : {}) },
       type: h.type,
-      snippet: h.snippet,
+      ...(h.snippet ? { snippet: h.snippet } : {}),
+      ...(h.media ? { media: h.media } : {}),
+      ...deletionFields(h, users),
     }))
     return paginate('hits', rows, total, offset)
   },

@@ -2,6 +2,7 @@ import { getGroup } from '../../db/queries/groups.js'
 import { TriggerType, type BaseTriggerConfig, type DispatchCtx, type JobSpec, type TriggerCondition, type TriggerEvent } from '../types.js'
 import { fewerMessagesThan, joinedWithinDays, senderNotAdmin } from '../conditions.js'
 import { DEFAULT_SPAM_PROMPT, SPAM_DEFAULT_ERROR_TEMPLATE, SPAM_TRIGGER_DEFAULTS } from './defaults.js'
+import { hasLink, TEXT_SCAN_MAX } from '../../utils/text.js'
 
 export interface SpamTriggerConfig extends BaseTriggerConfig {
   groupsMode: 'all' | 'only' | 'except'
@@ -20,19 +21,13 @@ export interface SpamTriggerConfig extends BaseTriggerConfig {
 }
 
 export const SPAM_REGEX_MAX = 200
-export const SPAM_TEXT_SCAN_MAX = 4_000
+export const SPAM_TEXT_SCAN_MAX = TEXT_SCAN_MAX
 const PROMPT_MAX = 20_000
 const INSTRUCTIONS_MAX = 4_000
 const ERROR_TEMPLATE_MAX = 1_000
 
-const LINK_RE = /https?:\/\/|\bwww\.[a-z0-9]|\b(?:[a-z0-9-]{1,63}\.){1,10}[a-z]{2,24}\//i
 /** A group that already repeats something inside, repeated again, like (a+)+: can take forever. */
 const SLOW_REGEX_RE = /\([^)]*(?:[+*]|\{\d+,\d*\})[^)]*\)(?:[+*]|\{\d+,\d*\})/
-
-/** Whether the text has a web link: http(s)://, www., or a domain followed by a slash. */
-export function hasLink(text: string): boolean {
-  return LINK_RE.test(text.slice(0, SPAM_TEXT_SCAN_MAX))
-}
 
 function textOf(event: TriggerEvent): string {
   const text = event.record.metadata?.text

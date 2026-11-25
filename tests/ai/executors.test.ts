@@ -5,6 +5,7 @@ import { seedGroup, seedUser, seedMember, seedMessage, seedTenant } from '../hel
 import { resolveTenantScope } from '../../src/bot/scope.js'
 import { rawToolDeclarations } from '../../src/ai/tools/loader.js'
 import { executeQaTool, toolExecutorNames, TOOL_RESULT_MAX_BYTES } from '../../src/ai/tools/executors.js'
+import { SEARCH_MEDIA_KINDS } from '../../src/db/queries/group-tools.js'
 
 const ANNA = 'anna@lid'
 const BORIS = 'boris@lid'
@@ -201,8 +202,47 @@ describe('message_search', () => {
     expect(run('message_search', { query: ['secret'] }, ctx).total).toBe(0)
   })
 
-  it('requires a non-empty query', () => {
-    expect(run('message_search', { query: [] }, ctx).error).toMatch(/query/i)
-    expect(run('message_search', {}, ctx).error).toMatch(/query/i)
+  it('requires at least one of query, has_link or media', () => {
+    const msg = 'Give at least one of query, has_link or media.'
+    expect(run('message_search', { query: [] }, ctx).error).toBe(msg)
+    expect(run('message_search', { query: ['  '] }, ctx).error).toBe(msg)
+    expect(run('message_search', {}, ctx).error).toBe(msg)
+    expect(run('message_search', { has_link: false, media: [] }, ctx).error).toBe(msg)
+  })
+
+  it('declares the alternatives the executor accepts', () => {
+    const decl = rawToolDeclarations().find(t => t.name === 'message_search')!
+    const props = decl.parameters.properties as Record<string, { type: string; items?: { enum?: string[] } }>
+    expect(props.has_link.type).toBe('boolean')
+    expect(props.include_deleted.type).toBe('boolean')
+    expect(props.media.items!.enum).toEqual(SEARCH_MEDIA_KINDS)
+    expect(decl.parameters.required).toBeUndefined()
+  })
+
+  it('lists the allowed media kinds for an unknown one', () => {
+    const out = run('message_search', { media: ['gif'] }, ctx)
+    expect(out.error).toContain("'gif'")
+    expect(out.error).toContain('image, video, sticker, voice message, audio, document, location, contact')
+  })
+
+  it('finds links, media and deleted messages, with media and deleted_by on the hits', () => {
+    const T = 1789473600
+    seedMessage('b@g.us', BORIS, 'buy now https://x.y', T + 300, { messageId: 'S1' })
+    seedMessage('b@g.us', ANNA, '', T + 400, { eventType: 'delete', parentId: 'S1' })
+    seedMessage('b@g.us', BORIS, '', T + 500, { messageId: 'P1', metadata: { contentType: 'imageMessage' } })
+    const visible = run('message_search', { has_link: true, media: ['image'] }, ctx)
+    expect(visible.hits.map((h: { id: string }) => h.id)).toEqual(['P1'])
+    const out = run('message_search', { has_link: true, media: ['image'], include_deleted: true, order: 'asc' }, ctx)
+    expect(out.total).toBe(2)
+    const [s1, p1] = out.hits
+    expect(s1.id).toBe('S1')
+    expect(s1.snippet).toBe('buy now https://x.y')
+    expect(s1.deleted).toBe(true)
+    expect(s1.deleted_by).toEqual({ lid: ANNA, name: 'Anna' })
+    expect(s1.media).toBeUndefined()
+    expect(p1.id).toBe('P1')
+    expect(p1.media).toBe('image')
+    expect(p1.snippet).toBeUndefined() // an image without a caption has no text
+    expect(p1.deleted).toBeUndefined()
   })
 })
