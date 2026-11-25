@@ -30,8 +30,18 @@ describe('tenants pages', () => {
     expect(res.body).toContain('id="triggers"')
   })
 
+  it('serves the trigger form for a new and an existing trigger', async () => {
+    for (const url of ['/tenants/1/triggers/new?type=qa', '/tenants/1/triggers/2']) {
+      const res = await app.inject({ method: 'GET', url, headers: { cookie: auth.cookie } })
+      expect(res.statusCode).toBe(200)
+      expect(res.body).toContain('id="trigger-form"')
+    }
+  })
+
   it('redirects both pages to /login when unauthenticated', async () => {
     expect((await app.inject({ method: 'GET', url: '/tenants' })).statusCode).toBe(302)
     expect((await app.inject({ method: 'GET', url: '/tenants/1' })).statusCode).toBe(302)
+    expect((await app.inject({ method: 'GET', url: '/tenants/1/triggers/new?type=qa' })).statusCode).toBe(302)
+    expect((await app.inject({ method: 'GET', url: '/tenants/1/triggers/2' })).statusCode).toBe(302)
   })
 })

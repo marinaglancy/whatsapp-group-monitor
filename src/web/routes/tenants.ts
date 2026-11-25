@@ -87,6 +87,17 @@ export function registerTenantRoutes(app: FastifyInstance) {
     return sendPage(reply, 'tenant.html', req)
   })
 
+  // 'new' is a fixed segment, so it wins over :triggerId
+  app.get('/tenants/:id/triggers/new', { preHandler: requireAuth }, async (req, reply) => {
+    generateCsrf(req)
+    return sendPage(reply, 'trigger.html', req)
+  })
+
+  app.get('/tenants/:id/triggers/:triggerId', { preHandler: requireAuth }, async (req, reply) => {
+    generateCsrf(req)
+    return sendPage(reply, 'trigger.html', req)
+  })
+
   app.get('/api/tenants', { preHandler: requireAuthApi }, async (_req, reply) => {
     if (rejectNotReady(reply)) return
     const names = nameMap()

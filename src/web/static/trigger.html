@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trigger &middot; {{PROJECT_NAME}}</title>
+  <meta name="csrf-token" content="{{CSRF_TOKEN}}" />
+  <link rel="stylesheet" href="/static/shared.css" />
+  <style>
+    .content { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    .back { color: #667781; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1rem 1.25rem; margin: 1rem 0; }
+    .card h4 { font-size: 0.95rem; margin: 0; }
+    .row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+    .field { margin-bottom: 0.9rem; }
+    .field > label { display: block; font-size: 0.82rem; color: #667781; margin-bottom: 0.3rem; }
+    input[type=text], input[type=number], select, textarea { border: 1px solid #ddd; border-radius: 6px; padding: 0.35rem 0.5rem; font-size: 0.85rem; font-family: inherit; box-sizing: border-box; }
+    textarea { width: 100%; }
+    input[type=number] { width: 70px; }
+    .btn { display: inline-block; padding: 0.35rem 0.9rem; border-radius: 6px; border: 1px solid #d0d7de; background: #fff; font-size: 0.82rem; color: #1a1a1a; cursor: pointer; text-decoration: none; }
+    .btn-green { background: #25d366; color: #fff; border-color: #25d366; }
+    .btn-red { color: #c62828; border-color: #f0c0c0; }
+    .btn:disabled { opacity: 0.6; cursor: default; }
+    .muted { color: #667781; font-size: 0.82rem; }
+    .badge { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 4px; background: #e3f2fd; color: #1565c0; font-weight: normal; }
+    .lnk { color: #1565c0; cursor: pointer; margin-left: 0.4rem; }
+    .lnk:hover { text-decoration: underline; }
+    .default-box { display: none; background: #f6f7f8; border: 1px solid #eee; border-radius: 6px; padding: 0.5rem; font-size: 0.8rem; white-space: pre-wrap; margin-bottom: 0.4rem; max-height: 16rem; overflow-y: auto; }
+    .default-box.open { display: block; }
+    .error { color: #c62828; font-size: 0.82rem; margin-bottom: 0.5rem; }
+    .loading { text-align: center; padding: 2rem; color: #667781; }
+  </style>
+</head>
+<body>
+  {{> header}}
+  <div class="content">
+    {{> status-bar}}
+    <div id="trigger"><p class="loading">Loading...</p></div>
+  </div>
+
+  <script>
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const parts = window.location.pathname.split('/');
+    const tenantId = parseInt(parts[2], 10);
+    const isNew = parts[4] === 'new';
+    const triggerId = isNew ? null : parseInt(parts[4], 10);
+    const newType = new URLSearchParams(window.location.search).get('type') || '';
+    let data = null;
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    async function api(method, url, body) {
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        const json = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, json };
+      } catch (err) {
+        return { ok: false, status: 0, json: { error: 'Could not reach the server: ' + err.message } };
+      }
+    }
+
+    function backUrl() { return '/tenants/' + tenantId; }
+
+    function qaForm(cfg, type, groups) {
+      const options = groups.map(g => '<option value="' + esc(g.jid) + '"' + (g.jid === cfg.qaGroupJid ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('');
+      return '<p class="muted" style="margin:.3rem 0">Event: a message in the Q&amp;A group that @mentions the bot or replies to one of its messages</p>'
+        + '<div class="row" style="margin-bottom:1rem;font-size:.85rem"><label><input type="checkbox" id="f-only-first"' + (cfg.onlyIfFirst ? ' checked' : '') + '> Only if no earlier trigger fired for this event</label></div>'
+        + '<div class="field"><label for="f-name">Name</label><input type="text" id="f-name" style="width:260px" maxlength="100"></div>'
+        + '<div class="field"><label for="f-group">Q&amp;A group (one of this tenant\'s groups; questions are asked and answered here)</label>'
+        + '<select id="f-group" style="width:300px"><option value="">Choose a group...</option>' + options + '</select></div>'
+        + '<div class="field"><label>Timing</label><div class="row" style="font-size:.85rem">'
+        + 'Wait <input type="number" id="f-wait" min="0" value="' + esc(cfg.waitSeconds) + '"> seconds before processing &nbsp;&middot;&nbsp; '
+        + 'Ignore events older than <input type="number" id="f-age" min="1" value="' + esc(cfg.maxAgeMinutes) + '"> minutes</div></div>'
+        + '<div class="field"><label for="f-prompt">Prompt <span class="lnk" id="toggle-default" onclick="toggleDefault()">Show default</span></label>'
+        + '<div class="default-box" id="default-box"></div>'
+        + '<textarea id="f-prompt" rows="3" placeholder="Empty: use the default prompt for ' + esc(type.displayName) + '"></textarea>'
+        + '<div class="muted" style="margin-top:.25rem">Placeholders: <code>{{timezone}}</code> <code>{{botlid}}</code></div></div>'
+        + '<div class="field"><label for="f-instructions">Additional instructions (added after the prompt)</label>'
+        + '<textarea id="f-instructions" rows="3" placeholder="e.g. Always answer in Russian."></textarea></div>'
+        + '<div class="field"><label for="f-error">Error message (posted as a reply in the Q&amp;A group)</label>'
+        + '<textarea id="f-error" rows="2" placeholder="Empty: ' + esc(type.defaultErrorTemplate) + '"></textarea>'
+        + '<div class="muted" style="margin-top:.25rem">Placeholders: <code>{{error}}</code> <code>{{trigger}}</code> <code>{{group}}</code> <code>{{user}}</code> <code>{{message}}</code></div></div>';
+    }
+
+    function readQaConfig() {
+      return {
+        qaGroupJid: document.getElementById('f-group').value,
+        onlyIfFirst: document.getElementById('f-only-first').checked,
+        waitSeconds: Number(document.getElementById('f-wait').value),
+        maxAgeMinutes: Number(document.getElementById('f-age').value),
+        prompt: document.getElementById('f-prompt').value,
+        instructions: document.getElementById('f-instructions').value,
+        errorTemplate: document.getElementById('f-error').value,
+      };
+    }
+
+    // One entry per trigger type: how to draw its form and read it back
+    const forms = { qa: { draw: qaForm, read: readQaConfig } };
+
+    function render() {
+      const type = data.type;
+      const form = forms[type.id];
+      if (!form) {
+        document.getElementById('trigger').innerHTML = '<p class="error">This trigger type cannot be edited here.</p>';
+        return;
+      }
+      const trig = data.trigger;
+      const cfg = Object.assign({}, type.defaults, trig ? trig.config : {});
+      const name = trig ? trig.name : type.displayName;
+      const enabled = trig ? trig.enabled : false;
+      document.title = (trig ? trig.name : 'New ' + type.displayName) + ' · Trigger';
+      document.getElementById('trigger').innerHTML =
+        '<a class="back" href="' + backUrl() + '">&larr; Back to tenant ' + esc(data.tenant.name) + '</a>'
+        + '<form class="card" id="trigger-form" onsubmit="save(event)">'
+        + '<div class="row" style="justify-content:space-between;margin-bottom:.4rem"><h4>' + esc(name) + ' <span class="badge">' + esc(type.displayName) + '</span></h4>'
+        + '<label class="row" style="font-size:.85rem"><input type="checkbox" id="f-enabled"' + (enabled ? ' checked' : '') + '> Enabled</label></div>'
+        + form.draw(cfg, type, data.coveredGroups)
+        + '<div class="error" id="form-error"></div>'
+        + '<div class="row" style="justify-content:space-between">'
+        + (trig ? '<button type="button" class="btn btn-red" onclick="removeTrigger()">Delete trigger</button>' : '<span></span>')
+        + '<span class="row"><a class="btn" href="' + backUrl() + '">Cancel</a><button type="submit" class="btn btn-green" id="save-btn">Save</button></span></div>'
+        + '</form>';
+      // Set text values through .value so no escaping is needed
+      document.getElementById('f-name').value = name;
+      document.getElementById('f-prompt').value = cfg.prompt;
+      document.getElementById('f-instructions').value = cfg.instructions;
+      document.getElementById('f-error').value = cfg.errorTemplate;
+      document.getElementById('default-box').textContent = type.defaultPrompt;
+    }
+
+    function toggleDefault() {
+      const open = document.getElementById('default-box').classList.toggle('open');
+      document.getElementById('toggle-default').textContent = open ? 'Hide default' : 'Show default';
+    }
+
+    async function load() {
+      try {
+        let res;
+        if (isNew) {
+          res = await fetch('/api/trigger-types/' + encodeURIComponent(newType) + '?tenant=' + tenantId);
+        } else {
+          res = await fetch('/api/triggers/' + triggerId);
+        }
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json.error || 'Could not load the trigger');
+        data = isNew ? Object.assign({}, json, { trigger: null, tenant: null }) : json;
+        if (isNew) {
+          const t = await fetch('/api/tenants/' + tenantId);
+          const tj = await t.json().catch(() => ({}));
+          if (!t.ok) throw new Error(tj.error || 'Could not load the tenant');
+          data.tenant = tj.tenant;
+        }
+        render();
+      } catch (err) {
+        document.getElementById('trigger').innerHTML = '<p class="error">' + esc(err.message) + '</p>';
+      }
+    }
+
+    async function save(e) {
+      e.preventDefault();
+      const errBox = document.getElementById('form-error');
+      errBox.textContent = '';
+      const btn = document.getElementById('save-btn');
+      btn.disabled = true;
+      const body = {
+        name: document.getElementById('f-name').value,
+        enabled: document.getElementById('f-enabled').checked,
+        config: forms[data.type.id].read(),
+      };
+      let r;
+      if (isNew) r = await api('POST', '/api/tenants/' + tenantId + '/triggers', Object.assign({ type: data.type.id }, body));
+      else r = await api('PUT', '/api/triggers/' + triggerId, body);
+      if (!r.ok) {
+        errBox.textContent = r.json.error || 'Could not save the trigger';
+        btn.disabled = false;
+        return;
+      }
+      window.location.href = backUrl();
+    }
+
+    async function removeTrigger() {
+      if (!confirm('Delete this trigger? This cannot be undone.')) return;
+      const r = await api('DELETE', '/api/triggers/' + triggerId);
+      if (!r.ok) { document.getElementById('form-error').textContent = r.json.error || 'Could not delete the trigger'; return; }
+      window.location.href = backUrl();
+    }
+
+    load();
+  </script>
+</body>
+</html>
