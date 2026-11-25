@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedTenant } from '../helpers/fixtures.js'
-import { updateGroupQaConfig, getGroup } from '../../src/db/queries/groups.js'
 import { resolveTenantScope } from '../../src/bot/scope.js'
 import { getAccountDb } from '../../src/db/account.js'
-import { BOT_FUNCTION_QA, groups } from '../../src/db/schema.js'
+import { groups } from '../../src/db/schema.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
 beforeEach(() => {
@@ -17,43 +16,6 @@ beforeEach(() => {
   seedGroup('solo@g.us', 'Solo Group')
 })
 afterEach(() => { dbs.cleanup() })
-
-describe('updateGroupQaConfig', () => {
-  it('sets and clears the QA bit and stores linked jids', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['comm@g.us'] })
-    let g = getGroup('qa@g.us')!
-    expect(g.qaEnabled).toBe(true)
-    expect(g.qaLinkedJids).toEqual(['comm@g.us'])
-    expect(g.botFunctions & BOT_FUNCTION_QA).toBe(BOT_FUNCTION_QA)
-
-    updateGroupQaConfig('qa@g.us', { enabled: false, linkedJids: [] })
-    g = getGroup('qa@g.us')!
-    expect(g.qaEnabled).toBe(false)
-    expect(g.qaLinkedJids).toEqual([])
-  })
-
-  it('stores instructions and preserves foreign bot_config namespaces', () => {
-    // simulate a future function's config already present
-    getAccountDb().update(groups)
-      .set({ botConfig: { spam: { note: 'keep me' } } })
-      .where(eq(groups.jid, 'qa@g.us')).run()
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'], instructions: 'Be terse.' })
-    const g = getGroup('qa@g.us')!
-    expect(g.qaInstructions).toBe('Be terse.')
-    expect(g.botConfig).toEqual({ spam: { note: 'keep me' }, qa: { linkedJids: ['solo@g.us'], instructions: 'Be terse.' } })
-    // blank instructions remove the key
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'], instructions: null })
-    expect(getGroup('qa@g.us')!.qaInstructions).toBeNull()
-  })
-
-  it('appears in toJSON', () => {
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['solo@g.us'], instructions: 'Hi.' })
-    const json = getGroup('qa@g.us')!.toJSON() as Record<string, unknown>
-    expect(json.qaEnabled).toBe(true)
-    expect(json.qaLinkedJids).toEqual(['solo@g.us'])
-    expect(json.qaInstructions).toBe('Hi.')
-  })
-})
 
 describe('resolveTenantScope', () => {
   it('expands a community to its current children', () => {

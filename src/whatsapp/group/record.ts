@@ -1,4 +1,4 @@
-import { BOT_FUNCTION_QA, type Group, type GroupBotConfig } from '../../db/schema.js'
+import type { Group, GroupBotConfig } from '../../db/schema.js'
 import { getGroupMemberCounts, getGroupMembers, getDistinctMemberCount, getDistinctMembers } from '../../db/queries/members.js'
 import { getGroupActivityCounts, getGroupLastActivity, getGroupUserActivity } from '../../db/queries/activity.js'
 
@@ -90,18 +90,6 @@ export class GroupRecord {
     }
   }
 
-  get qaEnabled(): boolean {
-    return (this.botFunctions & BOT_FUNCTION_QA) !== 0
-  }
-
-  get qaLinkedJids(): string[] {
-    return this.botConfig?.qa?.linkedJids ?? []
-  }
-
-  get qaInstructions(): string | null {
-    return this.botConfig?.qa?.instructions ?? null
-  }
-
   getParent(): GroupRecord | null {
     return this._parent
   }
@@ -186,9 +174,6 @@ export class GroupRecord {
       permissions: this.permissions,
       botMembership: this.botMembership,
       botFunctions: this.botFunctions,
-      qaEnabled: this.qaEnabled,
-      qaLinkedJids: this.qaLinkedJids,
-      qaInstructions: this.qaInstructions,
       description: this.description,
       isArchived: this.isArchived,
       memberCount: this.memberCount,

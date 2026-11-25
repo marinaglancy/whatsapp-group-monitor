@@ -35,8 +35,7 @@ describe('mergeAccountDb groups schema drift', () => {
     mergeAccountDb(TEST_PHONE, backupPath)
     expect(getGroup('mine@g.us')!.name).toBe('Mine') // OR IGNORE keeps the live row
     const cfg = getGroup('cfg@g.us')!
-    expect(cfg.qaEnabled).toBe(true)
-    expect(cfg.qaLinkedJids).toEqual(['mine@g.us'])
-    expect(cfg.qaInstructions).toBe('Hi')
+    expect(cfg.botFunctions).toBe(1)
+    expect(cfg.botConfig).toEqual({ qa: { linkedJids: ['mine@g.us'], instructions: 'Hi' } })
   })
 })

@@ -7,7 +7,7 @@ import { makePreBotBackup } from '../helpers/backup.js'
 import { buildTestApp, loginTestApp } from '../helpers/web.js'
 import { mergeAccountDb } from '../../src/web/routes/backup.js'
 import { replaceAccountDbFile, getAccountDb } from '../../src/db/account.js'
-import { getGroup, updateGroupQaConfig } from '../../src/db/queries/groups.js'
+import { getGroup } from '../../src/db/queries/groups.js'
 import { insertJob, listJobs } from '../../src/db/queries/jobs.js'
 import { executeQaTool } from '../../src/ai/tools/executors.js'
 
@@ -33,8 +33,7 @@ function rowCounts(): Record<string, number> {
 
 describe('restore by merge', () => {
   it('merges a backup made before the bot existed, keeping the bot data already here', () => {
-    seedGroup('qa@g.us', 'Admins')
-    updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['old@g.us'] })
+    seedGroup('qa@g.us', 'Admins', { botFunctions: 1, botConfig: { qa: { linkedJids: ['old@g.us'] } } })
     insertJob({ jobType: 'qa_answer', groupJid: 'qa@g.us', messageId: 'Q1', runAt: NOW_S })
     const backup = join(dbs.dir, 'pre-bot.db')
     makePreBotBackup(backup, 'lighthouse')
@@ -42,7 +41,7 @@ describe('restore by merge', () => {
     mergeAccountDb(TEST_PHONE, backup)
 
     expect(getGroup('old@g.us')!.name).toBe('Old Group')
-    expect(getGroup('qa@g.us')!.qaLinkedJids).toEqual(['old@g.us']) // live bot settings kept
+    expect(getGroup('qa@g.us')!.botConfig).toEqual({ qa: { linkedJids: ['old@g.us'] } }) // live bot settings kept
     expect(listJobs({ limit: 10, offset: 0 }).total).toBe(1)          // live job history kept
     expect(rowCounts()).toMatchObject({ users: 1, group_members: 1, group_activity_log: 1 })
   })
@@ -72,9 +71,8 @@ describe('restore by replace', () => {
 
     replaceAccountDbFile(TEST_PHONE, backup) // reopens the database, which runs the upgrades
 
-    // per-group bot settings work (column added)
-    updateGroupQaConfig('old@g.us', { enabled: true, linkedJids: [] })
-    expect(getGroup('old@g.us')!.qaEnabled).toBe(true)
+    // per-group bot settings column exists (added)
+    expect(getGroup('old@g.us')!.botConfig).toBeNull()
     // bot jobs work (tables added)
     expect(insertJob({ jobType: 'qa_answer', groupJid: 'old@g.us', messageId: 'Q1', runAt: NOW_S })).not.toBeNull()
     // old messages are searchable (index built from the restored rows)

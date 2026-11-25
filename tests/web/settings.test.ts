@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { setupTestDbs } from '../helpers/db.js'
 import { buildTestApp, loginTestApp } from '../helpers/web.js'
-import { getSetting } from '../../src/db/queries/settings.js'
+import { getSetting, setSetting } from '../../src/db/queries/settings.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
 let app: FastifyInstance
@@ -80,23 +80,25 @@ describe('/api/settings AI keys', () => {
     expect((await get()).json().history_import).toBe('all') // unchanged
   })
 
-  it('reports whether the system prompt is the shipped default', async () => {
-    expect((await get()).json().ai_system_prompt_is_default).toBe(true)
-    await post({ ai_system_prompt: 'You are a pirate.' })
-    expect((await get()).json().ai_system_prompt_is_default).toBe(false)
-    await post({ ai_system_prompt: '' }) // clearing returns to tracking the default
-    expect((await get()).json().ai_system_prompt_is_default).toBe(true)
+  it('no longer exposes the main system prompt, and ignores posts of it', async () => {
+    setSetting('ai_system_prompt', 'Legacy prompt')
+    const body = (await get()).json()
+    expect('ai_system_prompt' in body).toBe(false)
+    expect('ai_system_prompt_is_default' in body).toBe(false)
+    expect((await post({ ai_system_prompt: 'You are a pirate.' })).statusCode).toBe(200)
+    expect(getSetting('ai_system_prompt')).toBe('Legacy prompt') // stored value unchanged
   })
 
-  it('exposes the effective system prompt and round-trips edits', async () => {
-    let body = (await get()).json()
-    expect(body.ai_system_prompt).toContain('WhatsApp') // shipped default
-    await post({ ai_system_prompt: 'You are a pirate.' })
-    body = (await get()).json()
-    expect(body.ai_system_prompt).toBe('You are a pirate.')
-    await post({ ai_system_prompt: '' }) // clearing restores the default
-    body = (await get()).json()
-    expect(body.ai_system_prompt).toContain('WhatsApp')
+  it('the group page has no Bot card and the old bot route is gone', async () => {
+    const page = await app.inject({ method: 'GET', url: '/group/x%40g.us', headers: { cookie: auth.cookie } })
+    expect(page.statusCode).toBe(200)
+    expect(page.body).not.toContain('id="bot-card"')
+    const res = await app.inject({
+      method: 'POST', url: '/api/groups/x/bot',
+      headers: { cookie: auth.cookie, 'x-csrf-token': auth.csrf, 'content-type': 'application/json' },
+      payload: { qaEnabled: true, qaLinkedJids: [] },
+    })
+    expect(res.statusCode).toBe(404)
   })
 
   it('settings page contains the AI assistant section', async () => {
@@ -105,7 +107,7 @@ describe('/api/settings AI keys', () => {
     expect(res.body).toContain('id="gemini_api_key"')
     expect(res.body).toContain('id="gemini_model"')
     expect(res.body).toContain('id="ai_daily_limit"')
-    expect(res.body).toContain('id="ai_system_prompt"')
+    expect(res.body).not.toContain('id="ai_system_prompt"')
     expect(res.body).toContain('id="timezone"')
   })
 

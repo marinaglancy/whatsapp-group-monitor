@@ -97,10 +97,6 @@
         <datalist id="timezone-list"></datalist>
         <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">IANA name, e.g. Europe/Lisbon. All dates the bot reads and writes use this timezone. Leave blank for UTC.</p>
 
-        <label for="ai_system_prompt">Main system prompt</label>
-        <textarea id="ai_system_prompt" name="ai_system_prompt" rows="9"></textarea>
-        <p style="color:#667781;font-size:0.75rem;margin:-0.5rem 0 1rem">Sent to the AI before every answer, together with the current date, the linked-group list, and each Q&amp;A group's own additional instructions. Placeholders: <code>{{timezone}}</code> (the timezone above), <code>{{botlid}}</code> (the bot account's id). Clearing this restores the default.</p>
-
         <button type="submit" class="save-btn">Save</button>
         <p class="msg" id="msg"></p>
       </form>
@@ -109,8 +105,6 @@
   <script>
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
     let keySet = false;
-    let promptLoaded = '';
-    let promptWasDefault = true;
 
     async function load() {
       try {
@@ -122,9 +116,6 @@
         document.getElementById('gemini_model').value = data.gemini_model || '';
         document.getElementById('ai_daily_limit').value = data.ai_daily_limit || '300';
         document.getElementById('timezone').value = data.timezone === 'UTC' ? '' : (data.timezone || '');
-        document.getElementById('ai_system_prompt').value = data.ai_system_prompt || '';
-        promptLoaded = data.ai_system_prompt || '';
-        promptWasDefault = !!data.ai_system_prompt_is_default;
         keySet = !!data.gemini_api_key_set;
         updateKeyHint();
       } catch (e) {
@@ -164,12 +155,6 @@
           ai_daily_limit: document.getElementById('ai_daily_limit').value,
           timezone: document.getElementById('timezone').value,
         };
-        // Only store the prompt when actually edited: an untouched default stays
-        // tracking the shipped default (so future default improvements arrive).
-        const promptValue = document.getElementById('ai_system_prompt').value;
-        if (!(promptWasDefault && promptValue === promptLoaded)) {
-          payload.ai_system_prompt = promptValue;
-        }
         const keyInput = document.getElementById('gemini_api_key').value;
         if (keyInput) payload.gemini_api_key = keyInput; // omit when blank so the stored key is kept
         const res = await fetch('/api/settings', {
@@ -182,14 +167,6 @@
             keySet = true;
             document.getElementById('gemini_api_key').value = '';
             updateKeyHint();
-          }
-          if ('ai_system_prompt' in payload) {
-            if (payload.ai_system_prompt.trim()) {
-              promptWasDefault = false;
-              promptLoaded = payload.ai_system_prompt;
-            } else {
-              await load(); // cleared → repopulate with the shipped default
-            }
           }
           showMsg('Settings saved', true);
         } else showMsg('Failed to save', false);

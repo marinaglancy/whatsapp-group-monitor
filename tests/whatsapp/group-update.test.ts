@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { WASocket } from 'baileys'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup } from '../helpers/fixtures.js'
-import { updateGroupQaConfig, getGroup } from '../../src/db/queries/groups.js'
+import { getGroup } from '../../src/db/queries/groups.js'
 import { getGroupMembers } from '../../src/db/queries/members.js'
 import { handleGroupsUpdate } from '../../src/whatsapp/handlers/group-update.js'
 
@@ -49,9 +49,8 @@ describe('handleGroupsUpdate', () => {
     expect(g.permissions).toMatchObject({ announce: true, joinApprovalMode: true })
     expect(g.botMembership).toBe('admin')
     // qa config untouched by the metadata refresh
-    expect(g.qaEnabled).toBe(true)
-    expect(g.qaLinkedJids).toEqual(['g2@g.us'])
-    expect(g.qaInstructions).toBe('Hi')
+    expect(g.botFunctions).toBe(1)
+    expect(g.botConfig).toEqual({ qa: { linkedJids: ['g2@g.us'], instructions: 'Hi' } })
     // participants synced from the fetched metadata
     expect(getGroupMembers('g1@g.us').map(m => m.userJid)).toContain('member@lid')
   })
@@ -69,7 +68,7 @@ describe('handleGroupsUpdate', () => {
     const g = getGroup('g1@g.us')!
     expect(g.name).toBe('Renamed Via Event')
     expect(g.botMembership).toBe('admin')
-    expect(g.qaEnabled).toBe(true) // config still preserved
+    expect(g.botFunctions).toBe(1) // config still preserved
     expect(getGroupMembers('g1@g.us').map(m => m.userJid)).toContain('member@lid')
   })
 

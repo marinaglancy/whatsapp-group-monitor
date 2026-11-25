@@ -7,7 +7,7 @@ import { getSock } from '../../whatsapp/client.js'
 import { requireAuth, requireAuthApi, generateCsrf, verifyCsrf } from '../middleware/auth.js'
 import { getSetting, getSettingOrDefault, setSetting } from '../../db/queries/settings.js'
 import { DEFAULT_GEMINI_MODEL, DEFAULT_AI_DAILY_LIMIT, getAiSettings, isValidTimezone } from '../../ai/settings.js'
-import { getAllGroups, getGroup, updateGroupQaConfig, QA_INSTRUCTIONS_MAX } from '../../db/queries/groups.js'
+import { getAllGroups, getGroup } from '../../db/queries/groups.js'
 import { GroupRecord } from '../../whatsapp/group/record.js'
 import { isAccountDbReady } from '../../db/account.js'
 import { jidNormalizedUser } from 'baileys'
@@ -94,8 +94,6 @@ export function registerRoutes(app: FastifyInstance) {
       gemini_api_key_set: !!getSetting('gemini_api_key'),
       gemini_model: getSettingOrDefault('gemini_model', DEFAULT_GEMINI_MODEL),
       ai_daily_limit: getSettingOrDefault('ai_daily_limit', String(DEFAULT_AI_DAILY_LIMIT)),
-      ai_system_prompt: getAiSettings().systemPrompt,
-      ai_system_prompt_is_default: !(getSetting('ai_system_prompt') || '').trim(),
       timezone: getAiSettings().timezone,
       history_import: getHistoryImportMode(),
     })
@@ -116,7 +114,7 @@ export function registerRoutes(app: FastifyInstance) {
     if ('history_import' in body && !(HISTORY_IMPORT_MODES as readonly unknown[]).includes(body.history_import)) {
       return reply.status(400).send({ error: `Unknown history import mode: ${body.history_import}` })
     }
-    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit', 'ai_system_prompt', 'timezone', 'history_import']
+    const allowed = ['project_name', 'page_size', 'gemini_model', 'ai_daily_limit', 'timezone', 'history_import']
     for (const key of allowed) {
       if (key in body && typeof body[key] === 'string') {
         setSetting(key, body[key])
@@ -197,36 +195,6 @@ export function registerRoutes(app: FastifyInstance) {
       },
       members: enrichedMembers,
     })
-  })
-
-  app.post('/api/groups/:jid/bot', { preHandler: requireAuthApi }, async (req, reply) => {
-    if (!verifyCsrf(req)) {
-      return reply.status(403).send({ error: 'Invalid CSRF token' })
-    }
-    if (!isAccountDbReady()) return reply.status(503).send({ error: 'Not connected' })
-    const { jid } = req.params as { jid: string }
-    const group = getGroup(jid)
-    if (!group) return reply.status(404).send({ error: 'Group not found' })
-    if (group.isCommunity) return reply.status(400).send({ error: 'Communities cannot be Q&A groups' })
-    const body = req.body as { qaEnabled?: unknown; qaLinkedJids?: unknown; qaInstructions?: unknown }
-    if (typeof body.qaEnabled !== 'boolean' || !Array.isArray(body.qaLinkedJids)
-      || body.qaLinkedJids.some(j => typeof j !== 'string')) {
-      return reply.status(400).send({ error: 'Invalid payload' })
-    }
-    if (body.qaInstructions !== undefined
-      && (typeof body.qaInstructions !== 'string' || body.qaInstructions.length > QA_INSTRUCTIONS_MAX)) {
-      return reply.status(400).send({ error: `Invalid instructions (max ${QA_INSTRUCTIONS_MAX} characters)` })
-    }
-    const linkedJids = body.qaLinkedJids as string[]
-    const known = new Set(getAllGroups().map(g => g.jid))
-    const unknown = linkedJids.filter(j => !known.has(j))
-    if (unknown.length) return reply.status(400).send({ error: `Unknown group jids: ${unknown.join(', ')}` })
-    updateGroupQaConfig(jid, {
-      enabled: body.qaEnabled,
-      linkedJids,
-      instructions: typeof body.qaInstructions === 'string' ? body.qaInstructions : null,
-    })
-    return reply.send({ ok: true })
   })
 
   app.get('/user/:jid', { preHandler: requireAuth }, async (req, reply) => {
