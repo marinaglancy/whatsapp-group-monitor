@@ -10,7 +10,12 @@ export class TriggerJobError extends Error {
 }
 
 /** The job's trigger no longer exists: fail quietly, post nothing. */
-export class TriggerGoneError extends Error {}
+export class TriggerGoneError extends Error {
+  constructor(message?: string) {
+    super(message)
+    this.name = 'TriggerGoneError'
+  }
+}
 
 export const ERROR_TEXT = {
   busy: 'the AI service is busy right now, please try again in a minute',

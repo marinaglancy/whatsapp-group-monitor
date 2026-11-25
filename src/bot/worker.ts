@@ -5,6 +5,7 @@ import {
 } from '../db/queries/jobs.js'
 import type { BotJob } from '../db/schema.js'
 import { logger } from '../utils/logger.js'
+import { TriggerJobError, TriggerGoneError } from '../triggers/errors.js'
 
 export const WORKER_TICK_MS = 20_000
 export const MAX_JOB_ATTEMPTS = 2
@@ -123,7 +124,11 @@ async function runJob(job: BotJob): Promise<void> {
       logger.warn({ jobId: job.id, err }, 'Bot job failed, will retry')
     } else {
       failJob(job.id, message)
-      logger.error({ jobId: job.id, err }, 'Bot job failed permanently')
+      if (err instanceof TriggerJobError || err instanceof TriggerGoneError) {
+        logger.warn({ jobId: job.id, error: err.message }, 'Bot job failed permanently (expected)')
+      } else {
+        logger.error({ jobId: job.id, err }, 'Bot job failed permanently')
+      }
       if (entry.opts.onFailure) {
         try {
           await entry.opts.onFailure(fresh, message, err)

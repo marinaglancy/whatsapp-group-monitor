@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { setupTestDbs } from '../helpers/db.js'
 import { insertJob, getJob, markJobProcessing } from '../../src/db/queries/jobs.js'
+import { logger } from '../../src/utils/logger.js'
+import { TriggerJobError, TriggerGoneError } from '../../src/triggers/errors.js'
 import {
   registerJobHandler, clearJobHandlers, startWorker, stopWorker, signalWorker, runWorkerPass,
 } from '../../src/bot/worker.js'
@@ -49,6 +51,22 @@ describe('worker', () => {
     expect(getJob(id)!.status).toBe('failed')
     expect(getJob(id)!.error).toContain('boom')
     expect(failures.length).toBe(1)
+  })
+
+  it('logs expected trigger failures as warnings without a stack, and other failures as errors', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    const error = vi.spyOn(logger, 'error').mockImplementation(() => undefined)
+    let n = 0
+    const errs = [new TriggerJobError('no key'), new TriggerGoneError('trigger 5 is gone'), new Error('boom')]
+    registerJobHandler('qa_answer', async () => { throw errs[n++] }, { shouldRetry: () => false })
+    const ids = [1, 2, 3].map(i => insertJob({ jobType: 'qa_answer', messageId: `M${i}`, runAt: NOW() })!)
+    await runWorkerPass()
+    expect(warn).toHaveBeenCalledWith({ jobId: ids[0], error: 'no key' }, expect.any(String))
+    expect(warn).toHaveBeenCalledWith({ jobId: ids[1], error: 'trigger 5 is gone' }, expect.any(String))
+    expect(error).toHaveBeenCalledTimes(1)
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ jobId: ids[2] }), 'Bot job failed permanently')
+    expect(new TriggerJobError('x').name).toBe('TriggerJobError')
+    expect(new TriggerGoneError('x').name).toBe('TriggerGoneError')
   })
 
   it('fails at once, without a retry, when shouldRetry rejects the error', async () => {
