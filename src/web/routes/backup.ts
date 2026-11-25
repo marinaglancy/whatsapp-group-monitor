@@ -89,8 +89,17 @@ function readBackupTenants(db: Database.Database): IncomingTenant[] {
   return convertLegacyQaGroups(legacy, getSetting('ai_system_prompt'))
 }
 
-export function mergeAccountDb(phone: string, backupDbPath: string): { skippedTenants: { name: string; conflicts: string[] }[] } {
-  const skippedTenants: { name: string; conflicts: string[] }[] = []
+/** A backup tenant left out of a merge. alreadyHere: a live tenant has the same name and exactly the same direct groups. */
+export interface SkippedTenant { name: string; conflicts: string[]; alreadyHere: boolean }
+
+export function skippedTenantText(t: SkippedTenant): string {
+  return t.alreadyHere
+    ? `Tenant "${t.name}" is already here`
+    : `Tenant "${t.name}" from the backup was skipped because some of its groups already belong to another tenant`
+}
+
+export function mergeAccountDb(phone: string, backupDbPath: string): { skippedTenants: SkippedTenant[] } {
+  const skippedTenants: SkippedTenant[] = []
   const mainDbPath = resolve(config.dataDir, phone, 'account.db')
   const db = new Database(mainDbPath)
   let attached = false
@@ -172,7 +181,12 @@ export function mergeAccountDb(phone: string, backupDbPath: string): { skippedTe
     for (const tenant of readBackupTenants(db)) {
       const conflicts = findConflicts(null, tenant.jids, entries, groups)
       if (conflicts.length > 0) {
-        skippedTenants.push({ name: tenant.name, conflicts })
+        const liveNames = db.prepare('SELECT id FROM tenants WHERE name = ?').all(tenant.name) as { id: number }[]
+        const alreadyHere = liveNames.some(({ id }) => {
+          const own = [...entries].filter(([, tid]) => tid === id).map(([jid]) => jid)
+          return own.length === tenant.jids.length && tenant.jids.every(j => entries.get(j) === id)
+        })
+        skippedTenants.push({ name: tenant.name, conflicts, alreadyHere })
         continue
       }
       const id = insertIncomingTenant(db, tenant)
@@ -357,8 +371,8 @@ export function registerBackupRoutes(app: FastifyInstance) {
               const { skippedTenants } = mergeAccountDb(phone, tmpPath)
               details.push(`Data for +${phone} merged`)
               for (const t of skippedTenants) {
-                logger.warn({ phone, tenant: t.name, groups: t.conflicts }, 'Backup tenant skipped: its groups already belong to another tenant')
-                details.push(`Tenant "${t.name}" from the backup was skipped because some of its groups already belong to another tenant`)
+                logger.warn({ phone, tenant: t.name, groups: t.conflicts, alreadyHere: t.alreadyHere }, 'Backup tenant skipped')
+                details.push(skippedTenantText(t))
               }
             } else {
               replaceAccountDbFile(phone, tmpPath)

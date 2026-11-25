@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { setupTestDbs, TEST_PHONE } from '../helpers/db.js'
 import { seedGroup } from '../helpers/fixtures.js'
 import { getGroup } from '../../src/db/queries/groups.js'
-import { mergeAccountDb } from '../../src/web/routes/backup.js'
+import { mergeAccountDb, skippedTenantText } from '../../src/web/routes/backup.js'
 import { makeBackupDb, OLD_GROUPS_DDL, NEW_GROUPS_DDL, TENANT_DDL } from '../helpers/backup.js'
 import { seedTenant } from '../helpers/fixtures.js'
 import { getAccountDb } from '../../src/db/account.js'
@@ -76,9 +76,32 @@ describe('mergeAccountDb tenants', () => {
     const backupPath = join(dbs.dir, 'tenants.db')
     tenantBackup(backupPath)
     const result = mergeAccountDb(TEST_PHONE, backupPath)
-    expect(result.skippedTenants).toEqual([{ name: 'Backup tenant', conflicts: ['a@g.us'] }])
+    expect(result.skippedTenants).toEqual([{ name: 'Backup tenant', conflicts: ['a@g.us'], alreadyHere: false }])
     expect(listTenants().map(t => t.id)).toEqual([liveId])
     expect(getTenantEntries(liveId)).toEqual(['a@g.us'])
+  })
+
+  it('reports a backup tenant as already here when a live tenant has the same name and the same groups', () => {
+    seedGroup('a@g.us', 'A')
+    seedGroup('b@g.us', 'B')
+    seedTenant('Backup tenant', ['b@g.us', 'a@g.us'])
+    const backupPath = join(dbs.dir, 'same.db')
+    tenantBackup(backupPath)
+    const result = mergeAccountDb(TEST_PHONE, backupPath)
+    expect(result.skippedTenants).toEqual([{ name: 'Backup tenant', conflicts: expect.any(Array), alreadyHere: true }])
+    expect(skippedTenantText(result.skippedTenants[0])).toBe('Tenant "Backup tenant" is already here')
+  })
+
+  it('does not call it already here when the groups differ or the name differs', () => {
+    seedGroup('a@g.us', 'A')
+    seedGroup('b@g.us', 'B')
+    seedTenant('Backup tenant', ['a@g.us'])
+    const backupPath = join(dbs.dir, 'differs.db')
+    tenantBackup(backupPath)
+    const result = mergeAccountDb(TEST_PHONE, backupPath)
+    expect(result.skippedTenants[0].alreadyHere).toBe(false)
+    expect(skippedTenantText(result.skippedTenants[0])).toBe(
+      'Tenant "Backup tenant" from the backup was skipped because some of its groups already belong to another tenant')
   })
 
   it('turns an old backup\'s Q&A groups into tenants', () => {
@@ -119,7 +142,7 @@ describe('mergeAccountDb tenants', () => {
     raw.exec(`UPDATE groups SET is_community = 1 WHERE jid = 'a@g.us'; UPDATE groups SET parent_community_jid = 'a@g.us' WHERE jid = 'b@g.us'`)
     raw.close()
     const result = mergeAccountDb(TEST_PHONE, backupPath)
-    expect(result.skippedTenants).toEqual([{ name: 'Second', conflicts: ['b@g.us'] }])
+    expect(result.skippedTenants).toEqual([{ name: 'Second', conflicts: ['b@g.us'], alreadyHere: false }])
     expect(listTenants().map(t => t.name)).toEqual(['First'])
   })
 
@@ -133,7 +156,7 @@ describe('mergeAccountDb tenants', () => {
       INSERT INTO tenants VALUES (1, 'Child tenant', 1, 1);
       INSERT INTO tenant_groups VALUES ('child@g.us', 1);`)
     const result = mergeAccountDb(TEST_PHONE, backupPath)
-    expect(result.skippedTenants).toEqual([{ name: 'Child tenant', conflicts: ['child@g.us'] }])
+    expect(result.skippedTenants).toEqual([{ name: 'Child tenant', conflicts: ['child@g.us'], alreadyHere: false }])
     expect(listTenants().map(t => t.name)).toEqual(['Live'])
   })
 
