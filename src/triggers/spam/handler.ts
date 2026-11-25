@@ -185,14 +185,19 @@ function messageLabel(msg: CheckedMessage): string {
   return msg.textKey ? msg.text : `(${msg.media ?? 'no text'})`
 }
 
-/** The message as the report quotes it. A word joiner after every @ that
+/** The sender's text as the bot posts it. A word joiner after every @ that
  *  comes before a digit keeps the sender's @<digits> from becoming mentions
- *  (pinging a member, or linking a group of another tenant): only the
- *  report's own tokens are mentions. */
+ *  (pinging a member, or linking a group of another tenant): only the bot's
+ *  own tokens are mentions. */
+function breakMentions(text: string): string {
+  return text.replace(/@(?=\d)/g, '@\u2060')
+}
+
+/** The message as the report quotes it. */
 function reportContents(msg: CheckedMessage): string {
   const label = msg.textKey ? msg.text.trim() : messageLabel(msg)
   const cut = label.length > SPAM_REPORT_TEXT_MAX ? label.slice(0, SPAM_REPORT_TEXT_MAX) + '…' : label
-  return cut.replace(/@(?=\d)/g, '@\u2060')
+  return breakMentions(cut)
 }
 
 interface JudgeInput { msg: CheckedMessage; copies: Copy[]; config: SpamTriggerConfig; scope: QaScope }
@@ -378,7 +383,7 @@ async function postOrEditReport(
 
 /** Where spam errors go: the trigger's notification group when it is one of
  *  the tenant's groups, at most once every 10 minutes per trigger; the others
- *  stay in the job log. */
+ *  stay in the job log. The sender's text in {{message}} makes no mentions. */
 export function spamErrorTarget(post: SpamDeps['post']): ErrorTarget {
   return {
     async send(job, trigger, text) {
@@ -391,5 +396,6 @@ export function spamErrorTarget(post: SpamDeps['post']): ErrorTarget {
       return { groupJid, messageId: await post(groupJid, text) }
     },
     throttleMs: SPAM_ERROR_THROTTLE_MS,
+    messageText: breakMentions,
   }
 }

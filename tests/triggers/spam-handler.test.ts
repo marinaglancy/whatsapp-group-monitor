@@ -587,6 +587,18 @@ describe('spam errors', () => {
     expect(posts[1].text).toContain('in Gamma')
   })
 
+  it('keeps @<digits> in {{message}} from becoming mentions', async () => {
+    seedGroup('120363999@g.us', 'Group of another tenant')
+    seedUser('4915550002@lid', 'Someone else')
+    setConfig({ errorTemplate: '{{user}}: "{{message}}" failed: {{error}}' })
+    await notifier()(copyJob('a@g.us', 'Join @120363999 now, ask @4915550002'), 'no key', fail)
+    expect(posts[0].text)
+      .toBe('@spammer: "Join @\u2060120363999 now, ask @\u20604915550002" failed: the AI is not set up yet (API key missing)')
+    const { mentions, groupMentions } = resolveMentionTokens(posts[0].text)
+    expect(groupMentions).toEqual([])
+    expect(mentions).not.toContain('4915550002@lid')
+  })
+
   it('posts nothing when no notification group is chosen', async () => {
     setConfig({ reportGroupJid: '' })
     await notifier()(copyJob('a@g.us'), 'no key', fail)

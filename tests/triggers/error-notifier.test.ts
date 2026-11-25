@@ -122,6 +122,12 @@ describe('trigger error notifier', () => {
     expect(sent[2].text).toBe('⚠️ Sorry, I could not answer: the AI could not answer')
   })
 
+  it('puts the message into {{message}} as it is for a target without its own format (Mentions)', async () => {
+    setTriggerConfig({ errorTemplate: '"{{message}}": {{error}}' })
+    await makeNotifier()(makeJob('ask @4917612345678 about @120363000'), 'x', new TriggerJobError('the AI could not answer'))
+    expect(sent.map(s => s.text)).toEqual(['"ask @4917612345678 about @120363000": the AI could not answer'])
+  })
+
   it('notifier stays silent once the answer was sent', async () => {
     const answered = makeJob('answered q')
     addJobEvent(answered.id, 'reply_sent', { messageId: 'X' })

@@ -18,6 +18,8 @@ export interface ErrorTarget {
   send(job: BotJob, trigger: BotTrigger, text: string): Promise<{ groupJid: string; messageId: string | null } | null>
   /** At most one post per trigger in this period; others are only logged. 0 = no throttle. */
   throttleMs: number
+  /** How the sender's text goes into {{message}}; as it is when not set. */
+  messageText?: (text: string) => string
 }
 
 /** Trigger id → time of its last error post (ms). */
@@ -43,13 +45,13 @@ export function buildTriggerErrorNotifier(target: ErrorTarget, now: () => number
       return
     }
     const config: BaseTriggerConfig = type.normalize(trigger.config)
-    const message = typeof job.payload?.text === 'string' ? job.payload.text : ''
+    const message = (typeof job.payload?.text === 'string' ? job.payload.text : '').slice(0, ERROR_MESSAGE_TEXT_MAX)
     const text = renderErrorTemplate(config.errorTemplate.trim() || type.defaultErrorTemplate, {
       error: errorTextFor(err, error),
       trigger: trigger.name,
       group: (job.groupJid && getGroup(job.groupJid)?.name) || job.groupJid || '',
       user: job.userJid ? '@' + bareId(job.userJid) : '',
-      message: message.slice(0, ERROR_MESSAGE_TEXT_MAX),
+      message: target.messageText ? target.messageText(message) : message,
     })
 
     // the slot is taken before the send, so two failures at the same moment cannot both post
