@@ -27,6 +27,18 @@ describe('job store', () => {
     expect(job!.aiCalls).toBe(0)
   })
 
+  it('de-duplicates per trigger', () => {
+    const base = { jobType: 'qa_answer', groupJid: 'g1@g.us', messageId: 'MT', runAt: NOW }
+    const a = insertJob({ ...base, triggerId: 1 })
+    const b = insertJob({ ...base, triggerId: 2 })
+    expect(a).not.toBeNull()
+    expect(b).not.toBeNull()
+    expect(insertJob({ ...base, triggerId: 1 })).toBeNull()
+    expect(getJob(a!)!.triggerId).toBe(1)
+    expect(insertJob(base)).not.toBeNull()
+    expect(insertJob(base)).toBeNull()
+  })
+
   it('returns null on duplicate (jobType, groupJid, messageId)', () => {
     expect(makeJob({ messageId: 'DUP' })).not.toBeNull()
     expect(makeJob({ messageId: 'DUP' })).toBeNull()

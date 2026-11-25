@@ -7,6 +7,7 @@ export interface InsertJobParams {
   groupJid?: string | null
   userJid?: string | null
   messageId?: string | null
+  triggerId?: number | null
   payload?: Record<string, unknown> | null
   runAt: number
   expiresAt?: number | null
@@ -19,7 +20,7 @@ function isUniqueViolation(err: unknown): boolean {
 }
 
 /** Insert a job. Returns the new job id, or null when a job for the same
- *  (jobType, groupJid, messageId) already exists. */
+ *  (jobType, triggerId, groupJid, messageId) already exists. */
 export function insertJob(params: InsertJobParams): number | null {
   const db = getAccountDb()
   try {
@@ -28,6 +29,7 @@ export function insertJob(params: InsertJobParams): number | null {
       groupJid: params.groupJid ?? null,
       userJid: params.userJid ?? null,
       messageId: params.messageId ?? null,
+      triggerId: params.triggerId ?? null,
       payload: params.payload ?? null,
       runAt: params.runAt,
       expiresAt: params.expiresAt ?? null,
