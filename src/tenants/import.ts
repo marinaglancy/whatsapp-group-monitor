@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import { logger } from '../utils/logger.js'
 import { BOT_FUNCTION_QA, type GroupBotConfig } from '../db/schema.js'
 import { QA_TRIGGER_DEFAULTS } from '../triggers/qa/defaults.js'
+import { ERROR_TEXT } from '../triggers/errors.js'
 import { findConflicts, type EntryMap, type GroupMap } from './membership.js'
 
 export interface LegacyQaGroup { jid: string; name: string; botFunctions: number; botConfig: GroupBotConfig | null; createdAt: number }
@@ -34,12 +35,13 @@ function readLegacyQa(g: LegacyQaGroup): LegacyQa | null {
   return { linkedJids: linked, instructions: typeof instructions === 'string' ? instructions : '' }
 }
 
-/** One tenant per legacy Q&A group (Q&A bit on, or a bot_config.qa entry), oldest group first. */
+/** One tenant per legacy Q&A group (Q&A bit on, or a bot_config.qa entry): groups with the Q&A bit on first, then oldest first. */
 export function convertLegacyQaGroups(groups: LegacyQaGroup[], legacyPrompt: string | null): IncomingTenant[] {
   return groups
     .map(g => ({ g, qa: readLegacyQa(g) }))
     .filter(({ g, qa }) => (g.botFunctions & BOT_FUNCTION_QA) !== 0 || qa !== null)
-    .sort((x, y) => x.g.createdAt - y.g.createdAt || (x.g.jid < y.g.jid ? -1 : x.g.jid > y.g.jid ? 1 : 0))
+    .sort((x, y) => Number((y.g.botFunctions & BOT_FUNCTION_QA) !== 0) - Number((x.g.botFunctions & BOT_FUNCTION_QA) !== 0) ||
+      x.g.createdAt - y.g.createdAt || (x.g.jid < y.g.jid ? -1 : x.g.jid > y.g.jid ? 1 : 0))
     .map(({ g, qa }) => ({
       name: g.name,
       jids: [...new Set([g.jid, ...(qa?.linkedJids ?? [])])],
@@ -112,11 +114,20 @@ export function migrateLegacyQaGroups(sqlite: Database.Database, legacyPrompt: s
   let created = 0
   for (const tenant of legacy) {
     const conflicts = findConflicts(null, tenant.jids, entries, groups)
-    for (const jid of conflicts) {
-      logger.warn({ jid, tenant: tenant.name }, 'Group already belongs to another tenant, left out of the converted Q&A tenant')
+    const qaJid = String(tenant.triggers[0].config.qaGroupJid)
+    // Only the tenant's own groups count; community children it never listed are not reported.
+    for (const jid of conflicts.filter(j => tenant.jids.includes(j))) {
+      if (jid === qaJid) {
+        logger.warn({ jid, tenant: tenant.name }, 'The Q&A group already belongs to another tenant: questions in that group will not be answered until the tenant is fixed')
+      } else {
+        logger.warn({ jid, tenant: tenant.name }, 'Group already belongs to another tenant, left out of the converted Q&A tenant')
+      }
       skippedJids.push(jid)
     }
     const jids = tenant.jids.filter(j => !conflicts.includes(j))
+    if (!jids.some(j => j !== qaJid)) {
+      logger.warn({ tenant: tenant.name }, `The converted tenant has no group besides its Q&A group: its questions will get "${ERROR_TEXT.noOtherGroups}"`)
+    }
     const id = insertIncomingTenant(sqlite, { ...tenant, jids })
     for (const jid of jids) entries.set(jid, id)
     created++

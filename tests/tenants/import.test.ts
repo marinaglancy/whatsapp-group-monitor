@@ -95,6 +95,40 @@ describe('converting legacy Q&A groups', () => {
     expect(warn).toHaveBeenCalledWith({ jid: 'shared@g.us', tenant: 'Two' }, expect.any(String))
   })
 
+  it('converts enabled Q&A groups before disabled ones, and warns about the one that loses its group', () => {
+    makeLegacyDb([
+      { jid: 'old-off@g.us', name: 'Old off', fn: 0, at: 1, cfg: { qa: { linkedJids: ['comm@g.us'] } } },
+      { jid: 'new-on@g.us', name: 'New on', fn: 1, at: 2, cfg: { qa: { linkedJids: ['comm@g.us'] } } },
+      { jid: 'comm@g.us', name: 'Community', comm: 1 },
+      { jid: 'kid@g.us', name: 'Kid', parent: 'comm@g.us' },
+    ])
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    initAccountDb(PHONE)
+    const byName = Object.fromEntries(listTenants().map(t => [t.name, getTenantEntries(t.id).sort()]))
+    expect(byName).toEqual({ 'New on': ['comm@g.us', 'new-on@g.us'], 'Old off': ['old-off@g.us'] })
+    expect(warn).toHaveBeenCalledWith({ jid: 'comm@g.us', tenant: 'Old off' }, expect.any(String))
+    expect(warn).toHaveBeenCalledWith({ tenant: 'Old off' }, expect.stringContaining('no other groups are in this tenant yet'))
+    expect(warn.mock.calls.some(c => (c[0] as { jid?: string }).jid === 'kid@g.us')).toBe(false)
+  })
+
+  it('warns that questions will not be answered when the tenant\'s own Q&A group is taken', () => {
+    makeLegacyDb([
+      { jid: 'a@g.us', name: 'A', fn: 1, at: 1, cfg: { qa: { linkedJids: ['b@g.us'] } } },
+      { jid: 'b@g.us', name: 'B', fn: 1, at: 2 },
+    ])
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    initAccountDb(PHONE)
+    expect(warn).toHaveBeenCalledWith({ jid: 'b@g.us', tenant: 'B' }, expect.stringContaining('will not be answered'))
+    expect(warn).toHaveBeenCalledWith({ tenant: 'B' }, expect.stringContaining('no other groups are in this tenant yet'))
+  })
+
+  it('warns when a tenant has no group besides its Q&A group', () => {
+    makeLegacyDb([{ jid: 'qa@g.us', name: 'Alone', fn: 1 }])
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    initAccountDb(PHONE)
+    expect(warn).toHaveBeenCalledWith({ tenant: 'Alone' }, expect.stringContaining('no other groups are in this tenant yet'))
+  })
+
   it('keeps the tenant and its Q&A trigger even when all its groups are taken', () => {
     makeLegacyDb([
       { jid: 'a@g.us', name: 'A', fn: 1, at: 1, cfg: { qa: { linkedJids: ['b@g.us'] } } },
