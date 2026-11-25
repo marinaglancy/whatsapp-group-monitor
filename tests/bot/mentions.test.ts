@@ -35,6 +35,21 @@ describe('resolveMentionTokens', () => {
     expect(out.mentions).toEqual([])
     expect(out.groupMentions).toEqual([])
   })
+
+  it('resolves an old-style group id with a hyphen to the group, never its leading digits to a member', () => {
+    seedGroup('4917612345678-1500000000@g.us', 'Old group')
+    seedUser('4917612345678@s.whatsapp.net', 'Its creator', '4917612345678')
+    const out = resolveMentionTokens('See @4917612345678-1500000000 for details.')
+    expect(out.groupMentions).toEqual([{ groupJid: '4917612345678-1500000000@g.us', groupSubject: 'Old group' }])
+    expect(out.mentions).toEqual([])
+  })
+
+  it('never resolves a hyphenated token as a member, even when no group matches', () => {
+    seedUser('4917612345678@s.whatsapp.net', 'Its creator', '4917612345678')
+    const out = resolveMentionTokens('Ask @4917612345678-1500000000 or @88112233445-2.')
+    expect(out.mentions).toEqual([])
+    expect(out.groupMentions).toEqual([])
+  })
 })
 
 describe('expandGroupMentionTokens', () => {
@@ -48,5 +63,16 @@ describe('expandGroupMentionTokens', () => {
   it('is idempotent on already-full tokens and leaves other digits alone', () => {
     expect(expandGroupMentionTokens('see @120363000000000001@g.us and @88112233445', gm))
       .toBe('see @120363000000000001@g.us and @88112233445')
+  })
+
+  it('rewrites an old-style group token with its hyphen, and is idempotent on it', () => {
+    const old = [{ groupJid: '4917612345678-1500000000@g.us', groupSubject: 'Old group' }]
+    expect(expandGroupMentionTokens('in @4917612345678-1500000000, and @4917612345678-1500000000@g.us.', old))
+      .toBe('in @4917612345678-1500000000@g.us, and @4917612345678-1500000000@g.us.')
+  })
+
+  it('leaves a hyphenated token alone when only its leading digits are the group', () => {
+    expect(expandGroupMentionTokens('@120363000000000001-5 and @120363000000000001', gm))
+      .toBe('@120363000000000001-5 and @120363000000000001@g.us')
   })
 })

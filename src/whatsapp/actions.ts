@@ -14,13 +14,14 @@ type GroupMention = { groupJid: string; groupSubject: string }
 
 /** Scan reply text for @<digits> tokens (the prompt tells the model to write
  *  groups as @<jid digits> and members as @<lid/phone digits>) and resolve
- *  them to the metadata that makes WhatsApp render tappable links. Unmatched
- *  tokens stay plain text. */
+ *  them to the metadata that makes WhatsApp render tappable links. Old-style
+ *  group ids have a hyphen (@<digits>-<digits>); such a token is only ever a
+ *  group. Unmatched tokens stay plain text. */
 export function resolveMentionTokens(text: string): {
   mentions: string[]
   groupMentions: GroupMention[]
 } {
-  const tokens = [...new Set([...text.matchAll(/@(\d{5,20})/g)].map(m => m[1]))]
+  const tokens = [...new Set([...text.matchAll(/@(\d{5,20}(?:-\d+)?)/g)].map(m => m[1]))]
   const mentions: string[] = []
   const groupMentions: GroupMention[] = []
   if (!tokens.length) return { mentions, groupMentions }
@@ -32,6 +33,8 @@ export function resolveMentionTokens(text: string): {
       groupMentions.push({ groupJid: g.jid, groupSubject: g.name })
       continue
     }
+    // its leading digits may be a member's (the group's creator): never a member
+    if (token.includes('-')) continue
     const jid = qFindUserJid(token) // accepts lid digits or phone digits
     if (jid && !seenUsers.has(jid)) {
       seenUsers.add(jid)
@@ -48,7 +51,8 @@ export function expandGroupMentionTokens(text: string, groupMentions: GroupMenti
   let out = text
   for (const gm of groupMentions) {
     const digits = gm.groupJid.split('@')[0]
-    out = out.replace(new RegExp(`@${digits}(?!\\d|@g\\.us)`, 'g'), `@${gm.groupJid}`)
+    // not the start of a longer token (more digits, or an old-style id's hyphen part)
+    out = out.replace(new RegExp(`@${digits}(?!\\d|-\\d|@g\\.us)`, 'g'), `@${gm.groupJid}`)
   }
   return out
 }

@@ -98,6 +98,17 @@ describe('postGroupMessage', () => {
     expect(row).toMatchObject({ eventType: 'message', userJid: BOT_LID })
     expect((row!.metadata as { text?: string }).text).toBe('Spam in @120363000000000001@g.us by @88112233445.')
   })
+
+  it('mentions an old-style group (id with a hyphen) as the group, not its creator', async () => {
+    seedGroup('4917612345678-1500000000@g.us', 'Old group')
+    seedUser('4917612345678@s.whatsapp.net', 'Its creator', '4917612345678')
+    await postGroupMessage(REPORTS, 'Spam in @4917612345678-1500000000.')
+    const [, message] = fake.calls[0].args as Args
+    const inner = message.groupMentionedMessage.message.extendedTextMessage
+    expect(inner.text).toBe('Spam in @4917612345678-1500000000@g.us.')
+    expect(inner.contextInfo.groupMentions).toEqual([{ groupJid: '4917612345678-1500000000@g.us', groupSubject: 'Old group' }])
+    expect(inner.contextInfo.mentionedJid).toBeUndefined()
+  })
 })
 
 describe('editGroupMessage', () => {
