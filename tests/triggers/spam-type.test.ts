@@ -74,7 +74,8 @@ describe('Spam trigger type', () => {
     expect(SPAM_EDIT_WINDOW_MS).toBe(840_000)
     expect(SPAM_REUSE_WINDOW_MS).toBe(900_000)
     expect(spamTriggerType.defaultErrorTemplate).toBe('⚠️ Spam check failed for a message by {{user}} in {{group}}: {{error}}')
-    for (const p of ['{{group}}', '{{user}}', '{{message}}']) expect(spamTriggerType.defaultPrompt).toContain(p)
+    // values the sender writes or chooses stay out of the default instructions (they are in the user's turn)
+    for (const p of ['{{group}}', '{{user}}', '{{message}}']) expect(spamTriggerType.defaultPrompt).not.toContain(p)
   })
 
   it('dispatches a spam_check job with the wait as runAt', () => {
