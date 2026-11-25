@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { WAMessage } from 'baileys'
 import { setupTestDbs } from '../helpers/db.js'
-import { seedGroup, seedUser, seedMember, seedMessage } from '../helpers/fixtures.js'
+import { seedGroup, seedUser, seedMember, seedMessage, seedTenant, seedQaTrigger } from '../helpers/fixtures.js'
 import { fakeProvider } from '../helpers/fake-provider.js'
 import { updateBotUser } from '../../src/whatsapp/handlers/connection.js'
 import { updateGroupQaConfig } from '../../src/db/queries/groups.js'
@@ -30,6 +30,7 @@ beforeEach(() => {
   seedMember('a@g.us', 'u9@lid')
   seedMessage('a@g.us', 'u9@lid', 'some linked-group chatter', Math.floor(Date.now() / 1000) - 3600)
   updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['a@g.us'] })
+  seedQaTrigger(seedTenant('T', ['qa@g.us', 'a@g.us']), 'qa@g.us')
   setSetting('gemini_api_key', 'sk-test')
   provider = fakeProvider([
     { toolCalls: [{ name: 'group_list', args: {} }] },

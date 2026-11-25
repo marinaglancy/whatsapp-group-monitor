@@ -33,23 +33,27 @@ export function dispatchEvent(event: TriggerEvent, nowMs: number = Date.now()): 
       }
       continue
     }
-    if (type.eventKind !== event.kind) continue
-    const config = type.normalize(row.config)
-    if (!type.watches(event, config)) continue
-    if (nowMs - record.timestamp * 1000 > config.maxAgeMinutes * 60_000) continue
-    if (config.onlyIfFirst && fired) continue
-    if (!type.conditions.every(c => c.check(event, config, ctx))) continue
+    try {
+      if (type.eventKind !== event.kind) continue
+      const config = type.normalize(row.config)
+      if (!type.watches(event, config)) continue
+      if (nowMs - record.timestamp * 1000 > config.maxAgeMinutes * 60_000) continue
+      if (config.onlyIfFirst && fired) continue
+      if (!type.conditions.every(c => c.check(event, config, ctx))) continue
 
-    fired = true
-    const spec = type.buildJob(event, config, ctx)
-    const jobId = insertJob({
-      jobType: type.jobType,
-      ...spec,
-      triggerId: row.id,
-      runAt: Math.floor(nowMs / 1000) + config.waitSeconds,
-      expiresAt: record.timestamp + config.maxAgeMinutes * 60,
-    })
-    if (jobId !== null) created.push(jobId)
+      fired = true
+      const spec = type.buildJob(event, config, ctx)
+      const jobId = insertJob({
+        jobType: type.jobType,
+        ...spec,
+        triggerId: row.id,
+        runAt: Math.floor(nowMs / 1000) + config.waitSeconds,
+        expiresAt: record.timestamp + config.maxAgeMinutes * 60,
+      })
+      if (jobId !== null) created.push(jobId)
+    } catch (err) {
+      logger.error({ err, triggerId: row.id }, 'Trigger failed, continuing with the next one')
+    }
   }
 
   if (created.length > 0) signalWorker()

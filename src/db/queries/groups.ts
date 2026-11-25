@@ -60,7 +60,7 @@ export function getGroup(jid: string): GroupRecord | null {
   return getAllGroups().find(g => g.jid === jid) ?? null
 }
 
-export const QA_INSTRUCTIONS_MAX = 4_000
+export { QA_INSTRUCTIONS_MAX } from '../../triggers/qa/defaults.js'
 
 /** Write the `qa` namespace of bot_config; other namespaces are preserved. */
 export function updateGroupQaConfig(groupJid: string, opts: { enabled: boolean; linkedJids: string[]; instructions?: string | null }): void {

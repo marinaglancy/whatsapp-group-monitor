@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { logger } from '../../src/utils/logger.js'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedTenant } from '../helpers/fixtures.js'
 import { updateBotUser, handleConnectionUpdate } from '../../src/whatsapp/handlers/connection.js'
@@ -121,5 +122,21 @@ describe('dispatchEvent', () => {
     const t3 = add({ onlyIfFirst: true })
     expect(t3).toBeGreaterThan(0)
     expect(dispatchEvent(ev(r), NOW_MS)).toEqual([])
+  })
+
+  it('keeps going when one trigger throws', () => {
+    class BrokenType extends TestType {
+      readonly id = 'broken'
+      watches(): boolean { throw new Error('boom') }
+    }
+    const errorLog = vi.spyOn(logger, 'error').mockImplementation(() => undefined)
+    registerTriggerType(new BrokenType())
+    add({}, 'broken')
+    const good = add()
+    const ids = dispatchEvent(ev(record()), NOW_MS)
+    expect(ids).toHaveLength(1)
+    expect(getJob(ids[0])!.triggerId).toBe(good)
+    expect(errorLog).toHaveBeenCalledTimes(1)
+    errorLog.mockRestore()
   })
 })

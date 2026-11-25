@@ -1,4 +1,7 @@
 import { getAccountDb } from '../../src/db/account.js'
+import { createTrigger } from '../../src/db/queries/triggers.js'
+import { QA_TRIGGER_DEFAULTS } from '../../src/triggers/qa/defaults.js'
+import type { QaTriggerConfig } from '../../src/triggers/qa/type.js'
 import { createTenant, setTenantGroups } from '../../src/db/queries/tenants.js'
 import { groups, users, groupMembers, groupActivityLog, type ActivityEventType, type Group, type GroupBotConfig, membershipLevels } from '../../src/db/schema.js'
 
@@ -57,4 +60,16 @@ export function seedTenant(name: string, jids: string[]): number {
   const id = createTenant(name)
   setTenantGroups(id, jids)
   return id
+}
+
+export function seedQaTrigger(tenantId: number, qaGroupJid: string, opts: {
+  config?: Partial<QaTriggerConfig>; enabled?: boolean; name?: string
+} = {}): number {
+  return createTrigger({
+    tenantId,
+    type: 'qa',
+    name: opts.name ?? 'Questions',
+    enabled: opts.enabled,
+    config: { ...QA_TRIGGER_DEFAULTS, qaGroupJid, ...opts.config },
+  })
 }

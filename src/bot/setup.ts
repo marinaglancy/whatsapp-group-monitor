@@ -14,6 +14,7 @@ import { executeQaTool, toolExecutorNames } from '../ai/tools/executors.js'
 import { createGeminiProvider } from '../ai/gemini.js'
 import type { BotJob } from '../db/schema.js'
 import { logger } from '../utils/logger.js'
+import { registerBuiltinTriggerTypes } from '../triggers/index.js'
 
 const TOOL_ECHO_CROP = 3_000
 const TOOL_ECHO_LOG_MAX = 2_000
@@ -203,6 +204,7 @@ function createQaJobHandler(deps: QaResponderDeps): JobHandler {
 
 /** Register all bot job handlers. `overrides` exists for tests. */
 export function setupBot(overrides: Partial<QaResponderDeps> = {}): void {
+  registerBuiltinTriggerTypes()
   const deps: QaResponderDeps = {
     createProvider: createGeminiProvider,
     sendReply: sendJobReply,
