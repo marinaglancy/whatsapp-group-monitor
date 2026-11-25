@@ -130,13 +130,13 @@ reply, with `{{error}}` replaced by a short plain reason. Temporary errors are r
 once first. Technical details stay in the job log.
 The tools are read-only queries over this monitor's own database:
 
-| Tool             | Returns                                                                                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `group_list`     | The groups in scope, with optional details (member count, bot role, last activity, …)                                          |
-| `group_members`  | Members of a group with roles, names, join dates and activity counts                                                           |
-| `group_messages` | Messages as participants see them: final edited text, polls with votes, events with responses, reactions, media indications    |
-| `activity_stats` | Aggregated counts per group and period: messages, edits, reactions, votes, plus contributor/engager/participant member numbers |
-| `message_search` | Full-text search (messages, captions, polls, events, attachment filenames); also finds links and media, and deleted messages   |
+| Tool             | Returns                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `group_list`     | The groups in scope, with optional details (member count, bot role, last activity, …)                                                             |
+| `group_members`  | Members of a group with roles, names, join dates and activity counts                                                                              |
+| `group_messages` | Messages as participants see them: final edited text, polls with votes, events with responses, reactions, media indications                       |
+| `activity_stats` | Aggregated counts per group and period: messages, edits, reactions, votes, plus contributor/engager/participant member numbers                    |
+| `message_search` | Full-text search (messages, captions, poll questions/options, event names, attachment filenames); can also find links, media and deleted messages |
 
 The tools only ever see the tenant's groups (enforced server-side;
 the model cannot widen its own scope), all dates use the configured timezone, and

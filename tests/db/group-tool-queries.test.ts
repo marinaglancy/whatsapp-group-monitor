@@ -298,6 +298,11 @@ describe('qSearchMessages links, media and deleted messages', () => {
     expect(ids({ hasLink: true })).toEqual(['L1'])
   })
 
+  it('has_link finds a www. link without a slash', () => {
+    seedMessage('c@g.us', ANNA, 'visit www.example.com', 20_400, { messageId: 'L2' })
+    expect(ids({ hasLink: true })).toEqual(['L1', 'L2'])
+  })
+
   it('has_link uses the last edited text', () => {
     seedMessage('c@g.us', ANNA, 'plain text', 21_000, { messageId: 'E1' })
     seedMessage('c@g.us', ANNA, '', 21_010, { eventType: 'edit', parentId: 'E1', metadata: { contentType: 'conversation', text: 'now with https://spam.example' } })
@@ -332,12 +337,35 @@ describe('qSearchMessages links, media and deleted messages', () => {
     expect(ids({ media: ['voice message', 'audio'] })).toEqual(['V1', 'A1'])
   })
 
+  it('location also finds a live location, contact also finds a card with several contacts', () => {
+    seedMessage('c@g.us', BORIS, '', 22_400, { messageId: 'LOC', metadata: { contentType: 'locationMessage' } })
+    seedMessage('c@g.us', BORIS, '', 22_500, { messageId: 'LIVE', metadata: { contentType: 'liveLocationMessage' } })
+    seedMessage('c@g.us', BORIS, '', 22_600, { messageId: 'CON', metadata: { contentType: 'contactMessage' } })
+    seedMessage('c@g.us', BORIS, '', 22_700, { messageId: 'CONS', metadata: { contentType: 'contactsArrayMessage' } })
+    const locations = search({ media: ['location'] }).hits
+    expect(locations.map(h => h.messageId)).toEqual(['LOC', 'LIVE'])
+    expect(locations.map(h => h.media)).toEqual(['location', 'live location'])
+    const contacts = search({ media: ['contact'] }).hits
+    expect(contacts.map(h => h.messageId)).toEqual(['CON', 'CONS'])
+    expect(contacts.map(h => h.media)).toEqual(['contact', 'contacts'])
+  })
+
   it('a message matching several alternatives is one hit; snippets around a query match stay', () => {
     const { hits, total } = search({ query: ['join'], hasLink: true })
     expect(total).toBe(1)
     expect(hits[0].messageId).toBe('L1')
     expect(hits[0].snippet).toBe('join here bit.ly/x')
     expect(hits[0].media).toBeNull()
+  })
+
+  it('a hit that matches the query gets the snippet around the match, not the start of its text', () => {
+    const text = 'bit.ly/y ' + 'filler '.repeat(40) + 'zebra crossing'
+    seedMessage('c@g.us', ANNA, text, 20_500, { messageId: 'Z1' })
+    const { hits } = search({ query: ['zebra'], hasLink: true })
+    const z1 = hits.find(h => h.messageId === 'Z1')!
+    expect(z1.snippet!.startsWith('…')).toBe(true)
+    expect(z1.snippet).toContain('zebra crossing')
+    expect(z1.snippet).not.toContain('bit.ly/y')
   })
 
   it('pages the union in date order', () => {
@@ -362,6 +390,18 @@ describe('qSearchMessages links, media and deleted messages', () => {
     const m7 = search({ query: ['"delete me"'], includeDeleted: true }, A).hits
     expect(m7.map(h => h.messageId)).toEqual(['M7'])
     expect(m7[0].deletedBy).toBe(BORIS)
+  })
+
+  it('include_deleted applies to the media alternative too', () => {
+    seedMessage('c@g.us', ANNA, '', 23_200, { messageId: 'XI', metadata: { contentType: 'imageMessage' } })
+    seedMessage('c@g.us', BORIS, '', 23_300, { eventType: 'delete', parentId: 'XI' }) // an admin deletes Anna's image
+    expect(ids({ media: ['image'] })).toEqual(['I1'])
+    const { hits } = search({ media: ['image'], includeDeleted: true })
+    expect(hits.map(h => h.messageId)).toEqual(['I1', 'XI'])
+    expect(hits[0].deleted).toBeUndefined()
+    expect(hits[1].deleted).toBe(true)
+    expect(hits[1].deletedBy).toBe(BORIS)
+    expect(hits[1].media).toBe('image')
   })
 })
 

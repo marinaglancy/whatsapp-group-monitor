@@ -588,24 +588,29 @@ export function buildFtsMatch(query: string[]): string | null {
   return groups.length ? groups.join(' OR ') : null
 }
 
-/** The stored contentType behind each media kind message_search can filter
- *  on. SQL narrows by it; mediaIndication confirms (it tells a voice message
+/** The stored contentTypes behind each media kind message_search can filter
+ *  on. SQL narrows by them; mediaIndication confirms (it tells a voice message
  *  from other audio). */
-const CONTENT_TYPE_BY_MEDIA: Record<string, string> = {
-  image: 'imageMessage',
-  video: 'videoMessage',
-  sticker: 'stickerMessage',
-  'voice message': 'audioMessage',
-  audio: 'audioMessage',
-  document: 'documentMessage',
-  location: 'locationMessage',
-  contact: 'contactMessage',
+const CONTENT_TYPES_BY_MEDIA: Record<string, string[]> = {
+  image: ['imageMessage'],
+  video: ['videoMessage'],
+  sticker: ['stickerMessage'],
+  'voice message': ['audioMessage'],
+  audio: ['audioMessage'],
+  document: ['documentMessage'],
+  location: ['locationMessage', 'liveLocationMessage'],
+  contact: ['contactMessage', 'contactsArrayMessage'],
 }
-export const SEARCH_MEDIA_KINDS = Object.keys(CONTENT_TYPE_BY_MEDIA)
+export const SEARCH_MEDIA_KINDS = Object.keys(CONTENT_TYPES_BY_MEDIA)
 
-/** The media kind a mediaIndication value falls under: 'document: x.pdf' is a document. */
+/** mediaIndication values that fall under another kind's name. */
+const KIND_BY_INDICATION: Record<string, string> = { 'live location': 'location', contacts: 'contact' }
+
+/** The media kind a mediaIndication value falls under: 'document: x.pdf' is a
+ *  document, a live location is a location, a card with several contacts is a contact. */
 function mediaKind(indication: string): string {
-  return indication.startsWith('document: ') ? 'document' : indication
+  if (indication.startsWith('document: ')) return 'document'
+  return KIND_BY_INDICATION[indication] ?? indication
 }
 
 /** The final text of message row t in SQL, as finalState computes it: the last
@@ -690,7 +695,7 @@ export function qSearchMessages(ctx: QaToolQueryCtx, opts: {
     for (const r of rows) if (hasLink(r.txt)) found.set(r.id, r.ts)
   }
   if (media.length) {
-    const contentTypes = [...new Set(media.map(m => CONTENT_TYPE_BY_MEDIA[m]).filter(Boolean))]
+    const contentTypes = [...new Set(media.flatMap(m => CONTENT_TYPES_BY_MEDIA[m] ?? []))]
     // raw is only needed to tell a voice message from other audio
     const rows = db.all<{ id: number; ts: number; metadata: unknown; raw: unknown }>(sql`
       SELECT t.id AS id, t.timestamp AS ts, t.metadata AS metadata,
