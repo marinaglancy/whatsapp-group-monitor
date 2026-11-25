@@ -51,3 +51,16 @@ export function shadowedGroups(tenantId: number, entries: EntryMap, groups: Grou
   }
   return result
 }
+
+/** Another tenant's claim on a group, seen from tenantId: that tenant's own entry for the group,
+ *  else its entry for the group's community (communityJid set). null when no other tenant claims it. */
+export function otherTenantClaim(
+  groupJid: string, tenantId: number, entries: EntryMap, groups: GroupMap,
+): { tenantId: number; communityJid: string | null } | null {
+  const own = entries.get(groupJid)
+  if (own !== undefined && own !== tenantId) return { tenantId: own, communityJid: null }
+  const parent = groups.get(groupJid)?.parentCommunityJid
+  const viaParent = parent ? entries.get(parent) : undefined
+  if (parent && viaParent !== undefined && viaParent !== tenantId) return { tenantId: viaParent, communityJid: parent }
+  return null
+}

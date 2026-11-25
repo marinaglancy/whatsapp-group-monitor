@@ -221,7 +221,8 @@
       const top = allGroups.filter(g => !(g.parentCommunityJid && known.has(g.parentCommunityJid))).sort(byName);
       const line = (g, child, parentTicked) => {
         const taken = g.tenantId !== null && g.tenantId !== tenantId;
-        const ticked = parentTicked || selected.has(g.jid);
+        // A group taken by another tenant is never ticked, even under a ticked community
+        const ticked = !taken && (parentTicked || selected.has(g.jid));
         return '<div class="' + (child ? 'child ' : '') + (taken ? 'taken' : '') + '"><label>'
           + '<input type="checkbox" ' + (ticked ? 'checked ' : '') + (taken || parentTicked ? 'disabled ' : '')
           + 'onchange="toggleGroup(\'' + esc(g.jid) + '\', this.checked)"> ' + esc(g.name)
@@ -254,7 +255,8 @@
       const r = await api('PUT', '/api/tenants/' + tenantId + '/groups', { jids });
       if (r.status === 409) {
         err.innerHTML = esc(r.json.error) + ':<br>' + r.json.conflicts.map(c =>
-          esc(c.name) + (c.tenantName ? ' (in ' + esc(c.tenantName) + ')' : '')).join('<br>');
+          esc(c.name) + (c.tenantName ? ' (in tenant ' + esc(c.tenantName)
+            + (c.communityName ? ', through community ' + esc(c.communityName) : '') + ')' : '')).join('<br>');
         return;
       }
       if (!r.ok) { err.textContent = r.json.error || 'Could not save the groups'; return; }

@@ -10,7 +10,7 @@ import {
 import {
   listTriggers, getTrigger, createTrigger, updateTrigger, setTriggerEnabled, deleteTrigger, reorderTriggers,
 } from '../../db/queries/triggers.js'
-import { shadowedGroups, tenantOfGroup } from '../../tenants/membership.js'
+import { otherTenantClaim, shadowedGroups, tenantOfGroup } from '../../tenants/membership.js'
 import { getTriggerType, listTriggerTypes } from '../../triggers/registry.js'
 import { registerBuiltinTriggerTypes } from '../../triggers/index.js'
 import { DEFAULT_QA_SYSTEM_PROMPT, QA_DEFAULT_ERROR_TEMPLATE } from '../../triggers/qa/defaults.js'
@@ -131,6 +131,13 @@ export function registerTenantRoutes(app: FastifyInstance) {
       const owner = tenantOfGroup(jid, snapshot.entries, snapshot.groups)
       return `${names.get(jid) ?? jid} is in tenant ${owner === null ? '?' : tenantNames.get(owner) ?? '?'} directly, so it is not part of this tenant`
     })
+    // The other side: this tenant's own groups whose community is in another tenant
+    for (const jid of getTenantEntries(tenant.id)) {
+      const claim = otherTenantClaim(jid, tenant.id, snapshot.entries, snapshot.groups)
+      if (!claim?.communityJid) continue
+      const community = names.get(claim.communityJid) ?? claim.communityJid
+      warnings.push(`${names.get(jid) ?? jid} is also in community ${community} of tenant ${tenantNames.get(claim.tenantId) ?? '?'}`)
+    }
     const groupName = (jid: string) => names.get(jid) ?? jid
     const triggers = listTriggers(tenant.id).map(tr => {
       const type = getTriggerType(tr.type)
@@ -188,9 +195,15 @@ export function registerTenantRoutes(app: FastifyInstance) {
         const tenantNames = new Map(listTenants().map(t => [t.id, t.name]))
         return reply.status(409).send({
           error: 'Some groups already belong to another tenant',
+          // Name the other tenant, and the community when the group comes to it through one
           conflicts: err.conflicts.map(jid => {
-            const owner = tenantOfGroup(jid, snapshot.entries, snapshot.groups)
-            return { jid, name: names.get(jid) ?? jid, tenantName: owner === null ? '' : tenantNames.get(owner) ?? '' }
+            const claim = otherTenantClaim(jid, id, snapshot.entries, snapshot.groups)
+            return {
+              jid,
+              name: names.get(jid) ?? jid,
+              tenantName: claim ? tenantNames.get(claim.tenantId) ?? '' : '',
+              communityName: claim?.communityJid ? names.get(claim.communityJid) ?? claim.communityJid : null,
+            }
           }),
         })
       }

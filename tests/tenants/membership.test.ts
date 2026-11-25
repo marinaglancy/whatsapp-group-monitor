@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  tenantOfGroup, coveredGroupJids, findConflicts, shadowedGroups,
+  tenantOfGroup, coveredGroupJids, findConflicts, shadowedGroups, otherTenantClaim,
   type EntryMap, type GroupMap, type GroupNode,
 } from '../../src/tenants/membership.js'
 
@@ -55,5 +55,14 @@ describe('tenant membership rules', () => {
 
   it('lists shadowed groups for the tenant page warning', () => {
     expect(shadowedGroups(A, new Map([['comm', A], ['c1', B]]), makeGroups())).toEqual(['c1'])
+  })
+
+  it('names the other tenant that claims a group, directly or through its community', () => {
+    const entries: EntryMap = new Map([['comm', B], ['c1', A], ['s1', B]])
+    expect(otherTenantClaim('c1', A, entries, makeGroups())).toEqual({ tenantId: B, communityJid: 'comm' })
+    expect(otherTenantClaim('c1', B, entries, makeGroups())).toEqual({ tenantId: A, communityJid: null })
+    expect(otherTenantClaim('s1', A, entries, makeGroups())).toEqual({ tenantId: B, communityJid: null })
+    expect(otherTenantClaim('c2', B, entries, makeGroups())).toBeNull()
+    expect(otherTenantClaim('s1', B, entries, makeGroups())).toBeNull()
   })
 })
