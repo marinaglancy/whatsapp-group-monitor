@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import Ajv, { type ValidateFunction } from 'ajv'
 import { setupTestDbs } from '../helpers/db.js'
-import { seedGroup, seedUser, seedMember, seedMessage } from '../helpers/fixtures.js'
-import { updateGroupQaConfig } from '../../src/db/queries/groups.js'
-import { resolveQaScope } from '../../src/bot/scope.js'
+import { seedGroup, seedUser, seedMember, seedMessage, seedTenant } from '../helpers/fixtures.js'
+import { resolveTenantScope } from '../../src/bot/scope.js'
 import { rawToolDeclarations } from '../../src/ai/tools/loader.js'
 import { executeQaTool, toolExecutorNames, TOOL_RESULT_MAX_BYTES } from '../../src/ai/tools/executors.js'
 
@@ -28,7 +27,7 @@ function run(name: string, args: Record<string, unknown>, ctx: Parameters<typeof
 }
 
 let dbs: ReturnType<typeof setupTestDbs>
-let ctx: { scope: ReturnType<typeof resolveQaScope>; timezone: string }
+let ctx: { scope: ReturnType<typeof resolveTenantScope>; timezone: string }
 
 beforeEach(() => {
   dbs = setupTestDbs()
@@ -48,8 +47,8 @@ beforeEach(() => {
   seedMessage('a@g.us', BORIS, 'short', T + 60, { messageId: 'M2', parentId: 'M1', metadata: { contentType: 'conversation', text: 'short', isReply: true } })
   seedMessage('a@g.us', ANNA, '', T + 120, { eventType: 'reaction', parentId: 'M2', metadata: { emoji: '🔥' } })
   seedMessage('outside@g.us', ANNA, 'secret text', T)
-  updateGroupQaConfig('qa@g.us', { enabled: true, linkedJids: ['comm@g.us'] })
-  ctx = { scope: resolveQaScope('qa@g.us'), timezone: 'UTC' }
+  const tenantId = seedTenant('T', ['qa@g.us', 'comm@g.us'])
+  ctx = { scope: resolveTenantScope(tenantId, 'qa@g.us'), timezone: 'UTC' }
 })
 afterEach(() => { dbs.cleanup() })
 

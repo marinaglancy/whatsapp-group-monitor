@@ -1,3 +1,4 @@
+import { getTenantEntries } from '../db/queries/tenants.js'
 import { getAllGroups } from '../db/queries/groups.js'
 
 export interface QaScopeEntry {
@@ -13,18 +14,29 @@ export interface QaScope {
   entries: QaScopeEntry[]
   groupJids: string[]
   names: Map<string, string>
-  qaInstructions: string | null
+  /** Only set by resolveQaScope (legacy, removed with it). */
+  qaInstructions?: string | null
 }
 
-/** Resolve a QA group's linked jids into concrete group jids.
+/** Resolve a tenant's direct entries into concrete group jids.
  *  Communities expand to their current children; vanished jids are dropped.
- *  The QA group itself is always in scope (first, marked isSelf) — members
+ *  The asking group is always in scope (first, marked isSelf) — members
  *  expect the bot to be aware of the conversation it lives in. */
+export function resolveTenantScope(tenantId: number, selfJid: string): QaScope {
+  return resolveScope(selfJid, getTenantEntries(tenantId))
+}
+
+/** Resolve a QA group's linked jids into concrete group jids (same rules as resolveTenantScope). */
 export function resolveQaScope(qaGroupJid: string): QaScope {
+  const qaGroup = getAllGroups().find(g => g.jid === qaGroupJid)
+  const scope = resolveScope(qaGroupJid, qaGroup?.qaLinkedJids ?? [])
+  return { ...scope, qaInstructions: qaGroup?.qaInstructions ?? null }
+}
+
+function resolveScope(qaGroupJid: string, linked: string[]): QaScope {
   const all = getAllGroups() // linkAll() already applied inside
   const byJid = new Map(all.map(g => [g.jid, g]))
   const qaGroup = byJid.get(qaGroupJid)
-  const linked = qaGroup?.qaLinkedJids ?? []
 
   const entries: QaScopeEntry[] = []
   const groupJids: string[] = []
@@ -60,5 +72,5 @@ export function resolveQaScope(qaGroupJid: string): QaScope {
       addGroup(g.jid, g.name)
     }
   }
-  return { entries, groupJids, names, qaInstructions: qaGroup?.qaInstructions ?? null }
+  return { entries, groupJids, names }
 }
