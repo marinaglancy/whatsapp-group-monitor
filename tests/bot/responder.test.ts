@@ -8,9 +8,10 @@ import { setTenantGroups } from '../../src/db/queries/tenants.js'
 import { updateTrigger, deleteTrigger, setTriggerEnabled } from '../../src/db/queries/triggers.js'
 import { insertJob, getJob, getJobEvents, addJobEvent, addJobAiUsage } from '../../src/db/queries/jobs.js'
 import {
-  createQaAnswerHandler, buildTriggerErrorNotifier, isTransientAiError, buildFinalRoundMessages,
+  createQaAnswerHandler, isTransientAiError, buildFinalRoundMessages,
   QA_MAX_ROUNDS, QA_ANSWER_MAX_CHARS, QA_THREAD_MAX_DEPTH,
 } from '../../src/bot/responder.js'
+import { buildTriggerErrorNotifier } from '../../src/triggers/error-notifier.js'
 import { QA_ANSWER_SPEC } from '../../src/triggers/qa/answer.js'
 import { SEND_ANSWER_SCHEMA_WITH_TOOLS } from '../../src/triggers/ai-answer.js'
 import { DEFAULT_QA_SYSTEM_PROMPT, QA_TRIGGER_DEFAULTS } from '../../src/triggers/qa/defaults.js'
@@ -67,7 +68,10 @@ function setTriggerConfig(config: Partial<QaTriggerConfig>, name?: string): void
 }
 
 function makeNotifier() {
-  return buildTriggerErrorNotifier({ sendReply: async (job, text) => { sent.push({ text, jobId: job.id }); return `ERR${sent.length}` } })
+  return buildTriggerErrorNotifier({
+    send: async (job, _t, text) => { sent.push({ text, jobId: job.id }); return `ERR${sent.length}` },
+    throttleMs: 0,
+  })
 }
 
 function makeHandler(provider: AiProvider, nowMs: () => number = () => NOW_MS) {
@@ -589,51 +593,6 @@ describe('qa_answer handler', () => {
     const toolEvent = getJobEvents(job.id).find(e => e.eventType === 'tool_call')!
     expect(toolEvent.data!.resultChars as number).toBeGreaterThan(2000)
     expect('result' in toolEvent.data!).toBe(false)
-  })
-})
-
-describe('trigger error notifier', () => {
-  it('notifier posts the rendered template with the error text and records error_sent', async () => {
-    const notify = makeNotifier()
-    const limited = makeJob('limited q')
-    const err = new TriggerJobError(ERROR_TEXT.dailyLimit(3))
-    await notify(limited, err.stack!, err)
-    expect(sent).toEqual([{ text: '⚠️ Sorry, I could not answer: the daily AI usage limit (3 calls) is reached', jobId: limited.id }])
-    const events = getJobEvents(limited.id)
-    expect(events.map(e => e.eventType)).toEqual(['error_sent']) // not a reply_sent
-    expect(events[0]).toMatchObject({ groupJid: 'qa@g.us', messageId: 'ERR1' })
-
-    // errors that are not ours: busy for a 429, generic otherwise, never internals
-    await notify(makeJob('busy q'), 'Error: {"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}', new Error('x'))
-    expect(sent[1].text).toBe('⚠️ Sorry, I could not answer: the AI service is busy right now, please try again in a minute')
-    await notify(makeJob('crash q'), 'TypeError: boom\n    at handleQaAnswer (/app/src/bot/responder.ts:429:12)', new TypeError('boom'))
-    expect(sent[2].text).toBe('⚠️ Sorry, I could not answer: something went wrong; details are in the admin panel job log')
-  })
-
-  it('notifier uses the trigger\'s own template and placeholders', async () => {
-    setTriggerConfig({ errorTemplate: '{{trigger}} in {{group}} for {{user}} about "{{message}}": {{error}}' }, 'Ask me')
-    const question = 'q'.repeat(250)
-    const job = makeJob(question)
-    await makeNotifier()(job, 'x', new TriggerJobError('the AI could not answer'))
-    expect(sent.map(s => s.text)).toEqual([`Ask me in Admins for @asker about "${'q'.repeat(200)}": the AI could not answer`])
-
-    // a long AI message is cut before it goes into {{error}} (Review Focus 5)
-    setTriggerConfig({ errorTemplate: '{{error}}' })
-    await makeNotifier()(makeJob('long'), 'x', new TriggerJobError('e'.repeat(900)))
-    expect(sent[1].text).toBe('e'.repeat(500))
-
-    // a blank template means the default
-    setTriggerConfig({ errorTemplate: '   ' })
-    await makeNotifier()(makeJob('blank template'), 'x', new TriggerJobError('the AI could not answer'))
-    expect(sent[2].text).toBe('⚠️ Sorry, I could not answer: the AI could not answer')
-  })
-
-  it('notifier stays silent once the answer was sent', async () => {
-    const answered = makeJob('answered q')
-    addJobEvent(answered.id, 'reply_sent', { messageId: 'X' })
-    await makeNotifier()(answered, 'crashed after send', new Error('crashed after send'))
-    expect(sent).toEqual([])
-    expect(getJobEvents(answered.id).map(e => e.eventType)).toEqual(['reply_sent'])
   })
 })
 

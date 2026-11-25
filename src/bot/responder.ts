@@ -2,13 +2,11 @@ import type { BotJob, BotTrigger } from '../db/schema.js'
 import type { AiChatMessage, AiProvider } from '../ai/provider.js'
 import { getAiSettings, expandPlaceholders, type AiSettings } from '../ai/settings.js'
 import { executeQaTool } from '../ai/tools/executors.js'
-import {
-  AI_BUSY_RE, ERROR_TEXT, TriggerGoneError, TriggerJobError, errorTextFor, renderErrorTemplate,
-} from '../triggers/errors.js'
+import { AI_BUSY_RE, ERROR_TEXT, TriggerGoneError, TriggerJobError } from '../triggers/errors.js'
 import { parseAiAnswer } from '../triggers/ai-answer.js'
 import { buildScopeListing, checkDailyLimit, runAiAnswer } from '../triggers/ai-runner.js'
 import { QA_ANSWER_SPEC } from '../triggers/qa/answer.js'
-import { DEFAULT_QA_SYSTEM_PROMPT, QA_DEFAULT_ERROR_TEMPLATE } from '../triggers/qa/defaults.js'
+import { DEFAULT_QA_SYSTEM_PROMPT } from '../triggers/qa/defaults.js'
 import { qaTriggerType, type QaTriggerConfig } from '../triggers/qa/type.js'
 import { resolveTenantScope, type QaScope } from './scope.js'
 import { getBotUser } from '../whatsapp/handlers/connection.js'
@@ -16,7 +14,6 @@ import { getCreationRecord } from '../db/queries/activity.js'
 import { getJob, addJobEvent, getJobEvents, hasJobEvent } from '../db/queries/jobs.js'
 import { getTenantIdForGroup } from '../db/queries/tenants.js'
 import { getTrigger } from '../db/queries/triggers.js'
-import { getGroup } from '../db/queries/groups.js'
 import { qUsersByJids } from '../db/queries/group-tools.js'
 import { formatDateTime } from '../utils/time.js'
 import type { JobHandler } from './worker.js'
@@ -34,8 +31,6 @@ export const QA_CONTEXT_MESSAGES = 20
 export const QA_CONTEXT_MAX_AGE_MS = 48 * 3600_000
 export const QA_THREAD_MAX_DEPTH = 10
 export const QA_ANSWER_MAX_CHARS = 3_500
-/** Longest question text put into the error template's {{message}}. */
-export const ERROR_MESSAGE_TEXT_MAX = 200
 
 export interface QaResponderDeps {
   createProvider: (opts: { apiKey: string; model: string }) => AiProvider
@@ -138,33 +133,6 @@ export function isTransientAiError(err: unknown): boolean {
   if (typeof status === 'number') return status === 429 || status >= 500
   const text = err instanceof Error ? `${err.name} ${err.message}` : String(err)
   return AI_BUSY_RE.test(text) || NETWORK_RE.test(text)
-}
-
-/** onFailure notifier for the worker: posts the trigger's error template as a
- *  reply to the question, with a short {{error}} text, never internals. Stays
- *  silent when the answer was already sent (a late crash), or when the job's
- *  trigger is gone. */
-export function buildTriggerErrorNotifier(deps: Pick<QaResponderDeps, 'sendReply'>) {
-  return async function notifyTriggerError(job: BotJob, error: string, err: unknown): Promise<void> {
-    if (hasJobEvent(job.id, 'reply_sent') || err instanceof TriggerGoneError) return
-    const trigger = jobTrigger(job)
-    if (!trigger) return
-    const config = qaTriggerType.normalize(trigger.config)
-    const question = typeof job.payload?.text === 'string' ? job.payload.text : ''
-    const text = renderErrorTemplate(config.errorTemplate.trim() || QA_DEFAULT_ERROR_TEMPLATE, {
-      error: errorTextFor(err, error),
-      trigger: trigger.name,
-      group: (job.groupJid && getGroup(job.groupJid)?.name) || job.groupJid || '',
-      user: job.userJid ? '@' + bareId(job.userJid) : '',
-      message: question.slice(0, ERROR_MESSAGE_TEXT_MAX),
-    })
-    try {
-      const messageId = await deps.sendReply(job, text)
-      addJobEvent(job.id, 'error_sent', { groupJid: job.groupJid, messageId })
-    } catch (sendErr) {
-      logger.error({ err: sendErr, jobId: job.id }, 'Failed to send the error message')
-    }
-  }
 }
 
 function buildSystemPrompt(

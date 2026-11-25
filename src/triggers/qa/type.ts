@@ -1,7 +1,7 @@
 import { getCreationRecord } from '../../db/queries/activity.js'
 import { findJobIdByReplyMessage } from '../../db/queries/jobs.js'
 import { TriggerType, type BaseTriggerConfig, type DispatchCtx, type JobSpec, type TriggerCondition, type TriggerEvent } from '../types.js'
-import { QA_INSTRUCTIONS_MAX, QA_TRIGGER_DEFAULTS } from './defaults.js'
+import { DEFAULT_QA_SYSTEM_PROMPT, QA_DEFAULT_ERROR_TEMPLATE, QA_INSTRUCTIONS_MAX, QA_TRIGGER_DEFAULTS } from './defaults.js'
 
 export interface QaTriggerConfig extends BaseTriggerConfig {
   qaGroupJid: string
@@ -48,6 +48,8 @@ export class QaTriggerType extends TriggerType<QaTriggerConfig> {
   readonly displayName = 'Mentions'
   readonly eventKind = 'group_message' as const
   readonly jobType = 'qa_answer'
+  readonly defaultPrompt = DEFAULT_QA_SYSTEM_PROMPT
+  readonly defaultErrorTemplate = QA_DEFAULT_ERROR_TEMPLATE
   readonly conditions = [mentionOrReply]
 
   defaults(): QaTriggerConfig { return { ...QA_TRIGGER_DEFAULTS } }

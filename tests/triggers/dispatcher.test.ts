@@ -20,6 +20,8 @@ class TestType extends TriggerType<TestConfig> {
   readonly displayName = 'Test'
   readonly eventKind = 'group_message' as const
   readonly jobType = 'test_job'
+  readonly defaultPrompt = ''
+  readonly defaultErrorTemplate = ''
   readonly conditions = [{ id: 'match', check: (_e: TriggerEvent, c: TestConfig) => c.match }]
   defaults(): TestConfig {
     return { onlyIfFirst: false, waitSeconds: 0, maxAgeMinutes: 60, errorTemplate: '', match: true }

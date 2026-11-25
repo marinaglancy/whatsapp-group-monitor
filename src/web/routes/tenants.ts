@@ -13,7 +13,6 @@ import {
 import { otherTenantClaim, shadowedGroups, tenantOfGroup } from '../../tenants/membership.js'
 import { getTriggerType, listTriggerTypes } from '../../triggers/registry.js'
 import { registerBuiltinTriggerTypes } from '../../triggers/index.js'
-import { DEFAULT_QA_SYSTEM_PROMPT, QA_DEFAULT_ERROR_TEMPLATE } from '../../triggers/qa/defaults.js'
 
 const NAME_MAX = 100
 const ENABLED_ERROR = 'The enabled value must be true or false'
@@ -52,8 +51,8 @@ function typeInfo(type: NonNullable<ReturnType<typeof getTriggerType>>) {
     id: type.id,
     displayName: type.displayName,
     defaults: type.defaults(),
-    defaultPrompt: DEFAULT_QA_SYSTEM_PROMPT,
-    defaultErrorTemplate: QA_DEFAULT_ERROR_TEMPLATE,
+    defaultPrompt: type.defaultPrompt,
+    defaultErrorTemplate: type.defaultErrorTemplate,
   }
 }
 

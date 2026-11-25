@@ -1,120 +1,34 @@
-import { generateMessageID, generateWAMessageFromContent } from 'baileys'
-import { ActivityRecord } from '../whatsapp/activity/record.js'
 import { registerJobHandler, type JobHandler } from './worker.js'
-import { registerSentMessage } from './sent-registry.js'
 import type { QaScope } from './scope.js'
 import {
-  createQaAnswerHandler, buildTriggerErrorNotifier, isTransientAiError, loadQaTrigger, type QaResponderDeps,
+  createQaAnswerHandler, isTransientAiError, loadQaTrigger, type QaResponderDeps,
 } from './responder.js'
 import { addJobEvent, hasJobEvent } from '../db/queries/jobs.js'
 import { getSock } from '../whatsapp/client.js'
+import { postGroupMessage } from '../whatsapp/actions.js'
 import { getCreationRecord } from '../db/queries/activity.js'
-import { getAllGroups } from '../db/queries/groups.js'
-import { qFindUserJid } from '../db/queries/group-tools.js'
 import { getAiSettings } from '../ai/settings.js'
 import { executeQaTool, toolExecutorNames } from '../ai/tools/executors.js'
 import { createGeminiProvider } from '../ai/gemini.js'
 import type { BotJob } from '../db/schema.js'
 import { logger } from '../utils/logger.js'
 import { registerBuiltinTriggerTypes } from '../triggers/index.js'
+import { buildTriggerErrorNotifier } from '../triggers/error-notifier.js'
 import { TriggerGoneError, TriggerJobError } from '../triggers/errors.js'
 
 const TOOL_ECHO_CROP = 3_000
 const TOOL_ECHO_LOG_MAX = 2_000
 
-/** Scan reply text for @<digits> tokens (the prompt tells the model to write
- *  groups as @<jid digits> and members as @<lid/phone digits>) and resolve
- *  them to the metadata that makes WhatsApp render tappable links. Unmatched
- *  tokens stay plain text. */
-export function resolveMentionTokens(text: string): {
-  mentions: string[]
-  groupMentions: { groupJid: string; groupSubject: string }[]
-} {
-  const tokens = [...new Set([...text.matchAll(/@(\d{5,20})/g)].map(m => m[1]))]
-  const mentions: string[] = []
-  const groupMentions: { groupJid: string; groupSubject: string }[] = []
-  if (!tokens.length) return { mentions, groupMentions }
-  const groups = getAllGroups()
-  const seenUsers = new Set<string>()
-  for (const token of tokens) {
-    const g = groups.find(g => g.jid.split('@')[0] === token)
-    if (g) {
-      groupMentions.push({ groupJid: g.jid, groupSubject: g.name })
-      continue
-    }
-    const jid = qFindUserJid(token) // accepts lid digits or phone digits
-    if (jid && !seenUsers.has(jid)) {
-      seenUsers.add(jid)
-      mentions.push(jid)
-    }
-  }
-  return { mentions, groupMentions }
-}
-
-/** Rewrite matched group tokens from the prompt's @<digits> form to the
- *  @<full jid> form real WhatsApp clients put in group-mention message text —
- *  receiving phones match the token against the jid literally. */
-export function expandGroupMentionTokens(text: string, groupMentions: { groupJid: string; groupSubject: string }[]): string {
-  let out = text
-  for (const gm of groupMentions) {
-    const digits = gm.groupJid.split('@')[0]
-    out = out.replace(new RegExp(`@${digits}(?!\\d|@g\\.us)`, 'g'), `@${gm.groupJid}`)
-  }
-  return out
-}
-
 /** Send a reply into the job's group, quoted to the originating message when
- *  its raw payload is available in the activity log. Attaches mention metadata
- *  for @<digits> tokens so groups and members render as tappable links. */
+ *  its raw payload is available in the activity log. */
 export async function sendJobReply(job: BotJob, text: string): Promise<string | null> {
-  const sock = getSock()
   let quoted: { key: Record<string, unknown>; message: Record<string, unknown> } | undefined
   if (job.groupJid && job.messageId) {
     const row = getCreationRecord(job.groupJid, job.messageId)
     const raw = row?.raw as { key?: Record<string, unknown>; message?: Record<string, unknown> } | null
     if (raw?.key && raw?.message) quoted = { key: raw.key, message: raw.message }
   }
-  const { mentions, groupMentions } = resolveMentionTokens(text)
-  // Pre-generate and register the id BEFORE sending: Baileys echoes our own
-  // message back through messages.upsert on process.nextTick, which can beat
-  // the sendMessage promise — the trigger must already know it is ours.
-  const messageId = generateMessageID()
-  registerSentMessage(messageId)
-
-  if (groupMentions.length) {
-    // Group mentions render as tappable links only when the message is wrapped
-    // in a groupMentionedMessage envelope and the text carries the FULL group
-    // jid (verified against a message sent by a real phone). sendMessage cannot
-    // produce the envelope, so this path builds the message itself, relays it,
-    // and records its own activity row (relayMessage has no self-echo).
-    const fullMsg = generateWAMessageFromContent(job.groupJid!, {
-      extendedTextMessage: {
-        text: expandGroupMentionTokens(text, groupMentions),
-        contextInfo: {
-          ...(mentions.length ? { mentionedJid: mentions } : {}),
-          groupMentions,
-        },
-      },
-    } as never, {
-      userJid: sock.user!.id,
-      messageId,
-      ...(quoted ? { quoted: quoted as never } : {}),
-    })
-    fullMsg.message = { groupMentionedMessage: { message: fullMsg.message } } as never
-    await sock.relayMessage(job.groupJid!, fullMsg.message!, { messageId })
-    ActivityRecord.fromMessage(
-      { ...fullMsg, messageTimestamp: Math.floor(Date.now() / 1000) } as never,
-      job.groupJid!,
-    )?.saveAndProcess()
-    return messageId
-  }
-
-  const sent = await sock.sendMessage(
-    job.groupJid!,
-    { text, ...(mentions.length ? { mentions } : {}) },
-    { messageId, ...(quoted ? { quoted: quoted as never } : {}) },
-  )
-  return sent?.key?.id ?? messageId
+  return postGroupMessage(job.groupJid!, text, { quoted })
 }
 
 /** Best-effort "typing…" presence while a question is being answered. */
@@ -218,7 +132,8 @@ export function setupBot(overrides: Partial<QaResponderDeps> = {}): void {
     ...overrides,
   }
   registerJobHandler('qa_answer', createQaJobHandler(deps), {
-    onFailure: buildTriggerErrorNotifier(deps),
+    // errors are a reply to the question, every time
+    onFailure: buildTriggerErrorNotifier({ send: (job, _t, text) => deps.sendReply(job, text), throttleMs: 0 }),
     // a TriggerJobError has a known cause (it may quote the AI's own words,
     // which can sound transient); a gone trigger stays gone
     shouldRetry: err => !(err instanceof TriggerJobError) && !(err instanceof TriggerGoneError) && isTransientAiError(err),

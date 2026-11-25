@@ -29,6 +29,10 @@ export abstract class TriggerType<C extends BaseTriggerConfig = BaseTriggerConfi
   abstract readonly displayName: string
   abstract readonly eventKind: TriggerEvent['kind']
   abstract readonly jobType: string
+  /** Used when a trigger's own prompt is empty; shown on the trigger page. */
+  abstract readonly defaultPrompt: string
+  /** Used when a trigger's own error message is empty; shown on the trigger page. */
+  abstract readonly defaultErrorTemplate: string
   readonly conditions: TriggerCondition<C>[] = []
 
   abstract defaults(): C

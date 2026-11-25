@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedUser } from '../helpers/fixtures.js'
-import { resolveMentionTokens, expandGroupMentionTokens } from '../../src/bot/setup.js'
+import { resolveMentionTokens, expandGroupMentionTokens } from '../../src/whatsapp/actions.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
 beforeEach(() => {
