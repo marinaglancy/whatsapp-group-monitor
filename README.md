@@ -65,7 +65,7 @@ Each trigger has a name, an on/off switch and a place in the run order. Triggers
 bottom, and you can drag them to reorder. A trigger can be set to run only if no earlier
 trigger fired for the same event.
 
-Currently there is one trigger type: **Questions**, the AI Q&A assistant. Members of one
+Currently there is one trigger type: **Mentions**: the AI Q&A assistant, which answers when someone @mentions the bot or replies to it. Members of one
 chosen group (the Q&A group) can ask the bot questions about activity in the other groups of
 the tenant: message counts, conversation summaries, most/least active members, poll
 attendance.
@@ -78,7 +78,7 @@ Setup:
 2. Open the **Tenants** page (in the ⋮ menu) and click **+ New tenant**. Give it a name,
    then use **Change...** to choose its communities and groups. A group already used by
    another tenant is greyed out.
-3. Click **+ Add trigger** and choose **Questions**. Choose its **Q&A group**, which must be
+3. Click **+ Add trigger** and choose **Mentions**. Choose its **Q&A group**, which must be
    one of the tenant's groups, and save.
 4. Members of the Q&A group talk to the bot by **@mentioning** the connected account
    or **replying** to one of its messages. Replying to an answer continues that
@@ -98,7 +98,7 @@ On the trigger page you can also set:
 
 If you used an earlier version with Q&A groups, they are converted to tenants
 automatically on the first start of this version: one tenant per Q&A group, holding that
-group and its linked groups, with one Questions trigger named "Q&A" carrying the old
+group and its linked groups, with one Mentions trigger named "Q&A" carrying the old
 instructions (and the old main prompt, if you had changed it). The trigger stays switched
 off if Q&A was off for that group. A group already taken by an earlier tenant is left out
 of the later one (a warning is logged).

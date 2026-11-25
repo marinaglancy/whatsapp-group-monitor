@@ -45,7 +45,7 @@ function isInt(v: unknown, min: number, max: number): boolean {
 
 export class QaTriggerType extends TriggerType<QaTriggerConfig> {
   readonly id = 'qa'
-  readonly displayName = 'Questions'
+  readonly displayName = 'Mentions'
   readonly eventKind = 'group_message' as const
   readonly jobType = 'qa_answer'
   readonly conditions = [mentionOrReply]

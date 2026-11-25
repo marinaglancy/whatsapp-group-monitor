@@ -108,10 +108,10 @@ describe('tenants api', () => {
     expect(body.coveredGroups).toEqual([{ jid: 'k1@g.us', name: 'Kid1', botMembership: 'participant' }])
     expect(body.warnings).toEqual(['Kid2 is in tenant Beta directly, so it is not part of this tenant'])
     expect(body.triggers).toEqual([{
-      id: trig, name: 'Questions', type: 'qa', typeName: 'Questions', enabled: true,
+      id: trig, name: 'Questions', type: 'qa', typeName: 'Mentions', enabled: true,
       summary: 'Q&A group: Kid2 · wait 5 s', warning: 'The Q&A group is not in this tenant',
     }])
-    expect(body.triggerTypes).toEqual([{ id: 'qa', displayName: 'Questions' }])
+    expect(body.triggerTypes).toEqual([{ id: 'qa', displayName: 'Mentions' }])
     expect((await call('GET', '/api/tenants/9999')).statusCode).toBe(404)
   })
 
@@ -175,7 +175,7 @@ describe('tenants api', () => {
     expect(got.tenant).toEqual({ id: t, name: 'One' })
     expect(got.coveredGroups).toEqual([{ jid: 'a@g.us', name: 'A', botMembership: 'participant' }])
     expect(got.type).toMatchObject({
-      id: 'qa', displayName: 'Questions', defaultPrompt: DEFAULT_QA_SYSTEM_PROMPT,
+      id: 'qa', displayName: 'Mentions', defaultPrompt: DEFAULT_QA_SYSTEM_PROMPT,
       defaultErrorTemplate: QA_DEFAULT_ERROR_TEMPLATE,
     })
     expect(got.type.defaults.maxAgeMinutes).toBe(10)
