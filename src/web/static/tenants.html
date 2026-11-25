@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tenants &middot; {{PROJECT_NAME}}</title>
+  <meta name="csrf-token" content="{{CSRF_TOKEN}}" />
+  <link rel="stylesheet" href="/static/shared.css" />
+  <style>
+    .content { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    .back { color: #667781; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    .top { display: flex; justify-content: space-between; align-items: center; margin: 0.75rem 0; }
+    .top h2 { font-size: 1.1rem; margin: 0; color: #1a1a1a; }
+    .btn { display: inline-block; padding: 0.35rem 0.9rem; border-radius: 6px; border: 1px solid #d0d7de; background: #fff; font-size: 0.82rem; color: #1a1a1a; cursor: pointer; }
+    .btn-green { background: #25d366; color: #fff; border-color: #25d366; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    th, td { padding: 0.55rem 0.75rem; text-align: left; font-size: 0.85rem; }
+    th { background: #f8f9fa; color: #667781; font-weight: 600; }
+    td { border-top: 1px solid #eee; color: #1a1a1a; }
+    a { color: #0a7cff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .badge { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 4px; background: #e8f5e9; color: #2e7d32; }
+    .muted { color: #667781; }
+    .loading { text-align: center; padding: 2rem; color: #667781; }
+    .error { color: #c62828; }
+  </style>
+</head>
+<body>
+  {{> header}}
+  <div class="content">
+    {{> status-bar}}
+    <a class="back" href="/">&larr; Back to groups</a>
+    <div class="top">
+      <h2>Tenants</h2>
+      <button class="btn btn-green" onclick="newTenant()">+ New tenant</button>
+    </div>
+    <div id="tenants"><p class="loading">Loading...</p></div>
+  </div>
+  <script>
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function groupsText(entries) {
+      if (!entries.length) return '<span class="muted">No groups yet</span>';
+      return entries.map(e => esc(e.name)
+        + (e.isCommunity ? ' <span class="badge">community</span> (' + e.groupCount + ' group' + (e.groupCount === 1 ? '' : 's') + ')' : '')
+      ).join(', ');
+    }
+
+    async function load() {
+      const box = document.getElementById('tenants');
+      try {
+        const res = await fetch('/api/tenants');
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        if (!res.ok) throw new Error((await res.json()).error || 'Could not load tenants');
+        const { tenants } = await res.json();
+        if (!tenants.length) { box.innerHTML = '<p class="muted">No tenants yet.</p>'; return; }
+        box.innerHTML = '<table><tr><th>Name</th><th>Groups</th><th>Triggers</th></tr>'
+          + tenants.map(t => '<tr><td><a href="/tenants/' + t.id + '"><b>' + esc(t.name) + '</b></a></td>'
+            + '<td>' + groupsText(t.entries) + '</td>'
+            + '<td>' + (t.triggers.length ? t.triggers.map(x => esc(x.name)).join(', ') : '<span class="muted">None</span>') + '</td></tr>').join('')
+          + '</table>';
+      } catch (err) {
+        box.innerHTML = '<p class="error">' + esc(err.message) + '</p>';
+      }
+    }
+
+    async function newTenant() {
+      const name = prompt('Name of the new tenant:');
+      if (name === null) return;
+      const res = await fetch('/api/tenants', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { alert(data.error || 'Could not create the tenant'); return; }
+      window.location.href = '/tenants/' + data.id;
+    }
+
+    load();
+  </script>
+</body>
+</html>

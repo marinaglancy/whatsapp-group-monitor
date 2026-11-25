@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tenant &middot; {{PROJECT_NAME}}</title>
+  <meta name="csrf-token" content="{{CSRF_TOKEN}}" />
+  <link rel="stylesheet" href="/static/shared.css" />
+  <style>
+    .content { max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    .back { color: #667781; text-decoration: none; font-size: 0.85rem; }
+    .back:hover { text-decoration: underline; }
+    .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 1rem 1.25rem; margin: 1rem 0; }
+    .card h4 { font-size: 0.95rem; margin: 0 0 0.6rem; }
+    .row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+    .field { margin-bottom: 0.9rem; }
+    .field > label { display: block; font-size: 0.82rem; color: #667781; margin-bottom: 0.3rem; }
+    input[type=text] { border: 1px solid #ddd; border-radius: 6px; padding: 0.35rem 0.5rem; font-size: 0.85rem; font-family: inherit; }
+    .btn { display: inline-block; padding: 0.35rem 0.9rem; border-radius: 6px; border: 1px solid #d0d7de; background: #fff; font-size: 0.82rem; color: #1a1a1a; cursor: pointer; text-decoration: none; }
+    .btn-green { background: #25d366; color: #fff; border-color: #25d366; }
+    .btn-red { color: #c62828; border-color: #f0c0c0; }
+    .muted { color: #667781; font-size: 0.82rem; }
+    .badge { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 4px; background: #e8f5e9; color: #2e7d32; }
+    .badge-type { background: #e3f2fd; color: #1565c0; }
+    .badge-ten { background: #f3e5f5; color: #6a1b9a; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    td { padding: 0.5rem; border-top: 1px solid #f0f0f0; vertical-align: middle; }
+    tr:first-child td { border-top: none; }
+    tr.dragging { opacity: 0.4; }
+    tr.drop-over td { background: #f0faf4; }
+    .handle { color: #aaa; width: 1.2rem; cursor: grab; user-select: none; }
+    .warn { color: #b26a00; font-size: 0.8rem; margin-top: 0.15rem; }
+    .warnings { background: #fff8e1; color: #b26a00; border-radius: 6px; padding: 0.5rem 0.75rem; font-size: 0.82rem; margin-top: 0.75rem; }
+    .error { color: #c62828; font-size: 0.82rem; }
+    .loading { text-align: center; padding: 2rem; color: #667781; }
+    .menu-wrap { position: relative; display: inline-block; }
+    .menu { display: none; position: absolute; top: 100%; left: 0; margin-top: 0.2rem; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); min-width: 160px; z-index: 5; }
+    .menu.open { display: block; }
+    .menu a { display: block; padding: 0.4rem 0.8rem; font-size: 0.85rem; color: #1a1a1a; text-decoration: none; }
+    .menu a:hover { background: #f0f2f5; }
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 20; padding: 2rem 1rem; overflow-y: auto; }
+    .overlay.open { display: block; }
+    .modal { background: #fff; border-radius: 10px; max-width: 480px; margin: 0 auto; padding: 1rem 1.25rem; box-shadow: 0 8px 30px rgba(0,0,0,0.25); }
+    .modal h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+    .modal .list { border: 1px solid #eee; border-radius: 6px; padding: 0.5rem; font-size: 0.85rem; max-height: 50vh; overflow-y: auto; }
+    .modal .list div { padding: 0.2rem 0; }
+    .modal .list .child { margin-left: 1.4rem; }
+    .modal .list .taken { color: #aaa; }
+    #groups-filter { width: 100%; box-sizing: border-box; margin-bottom: 0.5rem; }
+    .modal .actions { display: flex; justify-content: flex-end; gap: 0.6rem; margin-top: 0.8rem; }
+  </style>
+</head>
+<body>
+  {{> header}}
+  <div class="content">
+    {{> status-bar}}
+    <a class="back" href="/tenants">&larr; All tenants</a>
+    <div id="tenant"><p class="loading">Loading...</p></div>
+  </div>
+
+  <div class="overlay" id="groups-popup">
+    <div class="modal">
+      <h4 id="popup-title"></h4>
+      <p class="muted" style="margin:0 0 0.5rem">A community brings all its groups, current and future. A group can be in only one tenant.</p>
+      <input type="text" id="groups-filter" placeholder="Filter by name..." oninput="renderPopupList()">
+      <div class="list" id="popup-list"></div>
+      <div class="error" id="popup-error"></div>
+      <div class="actions">
+        <button class="btn" onclick="closePopup()">Cancel</button>
+        <button class="btn btn-green" onclick="savePopup()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const tenantId = parseInt(window.location.pathname.split('/')[2], 10);
+    let data = null;
+    let allGroups = [];
+    let selected = new Set();
+
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    async function api(method, url, body) {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, json };
+    }
+
+    function groupsSummary(entries) {
+      if (!entries.length) return '<span class="muted">No groups yet</span>';
+      return entries.map(e => esc(e.name)
+        + (e.isCommunity ? ' <span class="badge">community</span> (' + e.groupCount + ' group' + (e.groupCount === 1 ? '' : 's') + ', current and future)' : '')
+      ).join(', ');
+    }
+
+    function render() {
+      const t = data.tenant;
+      const typeLinks = data.triggerTypes.map(x =>
+        '<a href="/tenants/' + t.id + '/triggers/new?type=' + encodeURIComponent(x.id) + '">' + esc(x.displayName) + '</a>').join('');
+      const rows = data.triggers.map(tr => '<tr draggable="true" data-id="' + tr.id + '">'
+        + '<td class="handle">&#8942;&#8942;</td>'
+        + '<td style="width:1.5rem"><input type="checkbox" ' + (tr.enabled ? 'checked' : '') + ' onchange="toggleTrigger(' + tr.id + ', this)"></td>'
+        + '<td><b>' + esc(tr.name) + '</b> <span class="badge badge-type">' + esc(tr.typeName) + '</span></td>'
+        + '<td class="muted">' + esc(tr.summary) + (tr.warning ? '<div class="warn">' + esc(tr.warning) + '</div>' : '') + '</td>'
+        + '<td style="text-align:right"><a class="btn" href="/tenants/' + t.id + '/triggers/' + tr.id + '">Edit</a></td></tr>').join('');
+      document.title = t.name + ' · Tenant';
+      document.getElementById('tenant').innerHTML =
+        '<div class="card">'
+        + '<div class="field"><label for="tenant-name">Tenant name</label>'
+        + '<input type="text" id="tenant-name" style="width:260px" maxlength="100" value="' + esc(t.name) + '"> '
+        + '<button class="btn" onclick="renameTenant()">Rename</button> <span class="error" id="rename-error"></span></div>'
+        + '<div class="row"><span class="muted">Groups:</span><span style="font-size:.85rem">' + groupsSummary(data.entries) + '</span>'
+        + '<button class="btn" onclick="openPopup()">Change...</button></div>'
+        + (data.warnings.length ? '<div class="warnings">' + data.warnings.map(w => '<div>' + esc(w) + '</div>').join('') + '</div>' : '')
+        + '</div>'
+        + '<div class="card"><h4>Triggers <span class="muted" style="font-weight:normal">(run in this order)</span></h4>'
+        + (rows ? '<table id="triggers"><tbody>' + rows + '</tbody></table>' : '<div id="triggers"><span class="muted">No triggers yet.</span></div>')
+        + '<div class="row" style="margin-top:.7rem"><span class="menu-wrap"><button class="btn" onclick="toggleAddMenu(event)">+ Add trigger &#9662;</button>'
+        + '<div class="menu" id="add-menu">' + typeLinks + '</div></span>'
+        + (data.triggers.length > 1 ? '<span class="muted">drag &#8942;&#8942; to change the order</span>' : '') + '</div></div>'
+        + '<div class="row" style="justify-content:flex-end"><button class="btn btn-red" onclick="deleteTenant()">Delete tenant</button></div>';
+      setupDrag();
+    }
+
+    async function load() {
+      try {
+        const res = await fetch('/api/tenants/' + tenantId);
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Could not load the tenant');
+        data = json;
+        render();
+      } catch (err) {
+        document.getElementById('tenant').innerHTML = '<p class="error">' + esc(err.message) + '</p>';
+      }
+    }
+
+    function toggleAddMenu(e) {
+      e.stopPropagation();
+      document.getElementById('add-menu').classList.toggle('open');
+    }
+    document.addEventListener('click', () => document.getElementById('add-menu')?.classList.remove('open'));
+
+    async function renameTenant() {
+      const name = document.getElementById('tenant-name').value;
+      const r = await api('PUT', '/api/tenants/' + tenantId, { name });
+      if (!r.ok) { document.getElementById('rename-error').textContent = r.json.error || 'Could not rename'; return; }
+      load();
+    }
+
+    async function deleteTenant() {
+      if (!confirm('Delete this tenant and all its triggers? This cannot be undone.')) return;
+      const r = await api('DELETE', '/api/tenants/' + tenantId);
+      if (!r.ok) { alert(r.json.error || 'Could not delete the tenant'); return; }
+      window.location.href = '/tenants';
+    }
+
+    async function toggleTrigger(id, box) {
+      const r = await api('PATCH', '/api/triggers/' + id + '/enabled', { enabled: box.checked });
+      if (!r.ok) { alert(r.json.error || 'Could not change the trigger'); load(); }
+    }
+
+    // Drag and drop to reorder triggers
+    let dragRow = null;
+    function setupDrag() {
+      const body = document.querySelector('#triggers tbody');
+      if (!body) return;
+      body.querySelectorAll('tr').forEach(row => {
+        row.addEventListener('dragstart', e => { dragRow = row; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', row.dataset.id); });
+        row.addEventListener('dragend', () => { row.classList.remove('dragging'); body.querySelectorAll('.drop-over').forEach(r => r.classList.remove('drop-over')); dragRow = null; });
+        row.addEventListener('dragover', e => { if (dragRow && dragRow !== row) { e.preventDefault(); row.classList.add('drop-over'); } });
+        row.addEventListener('dragleave', () => row.classList.remove('drop-over'));
+        row.addEventListener('drop', async e => {
+          e.preventDefault();
+          row.classList.remove('drop-over');
+          if (!dragRow || dragRow === row) return;
+          const rows = [...body.querySelectorAll('tr')];
+          if (rows.indexOf(dragRow) < rows.indexOf(row)) row.after(dragRow); else row.before(dragRow);
+          const ids = [...body.querySelectorAll('tr')].map(r => parseInt(r.dataset.id, 10));
+          const r = await api('PUT', '/api/tenants/' + tenantId + '/trigger-order', { ids });
+          if (!r.ok) { alert(r.json.error || 'Could not save the order'); }
+          load();
+        });
+      });
+    }
+
+    // Groups popup
+    async function openPopup() {
+      document.getElementById('popup-error').textContent = '';
+      document.getElementById('groups-filter').value = '';
+      document.getElementById('popup-title').textContent = 'Groups and communities in "' + data.tenant.name + '"';
+      const res = await fetch('/api/groups');
+      if (!res.ok) { alert('Could not load the groups'); return; }
+      allGroups = (await res.json()).groups;
+      selected = new Set(data.entries.map(e => e.jid));
+      renderPopupList();
+      document.getElementById('groups-popup').classList.add('open');
+    }
+    function closePopup() { document.getElementById('groups-popup').classList.remove('open'); }
+
+    function byName(a, b) { return a.name.localeCompare(b.name); }
+
+    function renderPopupList() {
+      const filter = document.getElementById('groups-filter').value.trim().toLowerCase();
+      const match = g => !filter || g.name.toLowerCase().includes(filter);
+      const known = new Set(allGroups.map(g => g.jid));
+      const children = {};
+      for (const g of allGroups) {
+        if (g.parentCommunityJid && known.has(g.parentCommunityJid)) (children[g.parentCommunityJid] ||= []).push(g);
+      }
+      const top = allGroups.filter(g => !(g.parentCommunityJid && known.has(g.parentCommunityJid))).sort(byName);
+      const line = (g, child, parentTicked) => {
+        const taken = g.tenantId !== null && g.tenantId !== tenantId;
+        const ticked = parentTicked || selected.has(g.jid);
+        return '<div class="' + (child ? 'child ' : '') + (taken ? 'taken' : '') + '"><label>'
+          + '<input type="checkbox" ' + (ticked ? 'checked ' : '') + (taken || parentTicked ? 'disabled ' : '')
+          + 'onchange="toggleGroup(\'' + esc(g.jid) + '\', this.checked)"> ' + esc(g.name)
+          + (g.isCommunity ? ' <span class="badge">community</span>' : '')
+          + (taken ? ' <span class="badge badge-ten">in ' + esc(g.tenantName || 'another tenant') + '</span>' : '')
+          + '</label></div>';
+      };
+      let html = '';
+      for (const g of top) {
+        const kids = (children[g.jid] || []).sort(byName);
+        const kidMatches = kids.filter(match);
+        if (!match(g) && !kidMatches.length) continue;
+        html += line(g, false, false);
+        const parentTicked = selected.has(g.jid);
+        for (const k of (match(g) ? kids : kidMatches)) html += line(k, true, parentTicked);
+      }
+      document.getElementById('popup-list').innerHTML = html || '<span class="muted">No groups found.</span>';
+    }
+
+    function toggleGroup(jid, on) {
+      if (on) selected.add(jid); else selected.delete(jid);
+      renderPopupList();
+    }
+
+    async function savePopup() {
+      const err = document.getElementById('popup-error');
+      err.textContent = '';
+      const parentOf = new Map(allGroups.map(g => [g.jid, g.parentCommunityJid]));
+      const jids = [...selected].filter(j => !selected.has(parentOf.get(j)));
+      const r = await api('PUT', '/api/tenants/' + tenantId + '/groups', { jids });
+      if (r.status === 409) {
+        err.innerHTML = esc(r.json.error) + ':<br>' + r.json.conflicts.map(c =>
+          esc(c.name) + (c.tenantName ? ' (in ' + esc(c.tenantName) + ')' : '')).join('<br>');
+        return;
+      }
+      if (!r.ok) { err.textContent = r.json.error || 'Could not save the groups'; return; }
+      closePopup();
+      load();
+    }
+
+    load();
+  </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { requireAuthApi, verifyCsrf } from '../middleware/auth.js'
+import { requireAuth, requireAuthApi, generateCsrf, verifyCsrf } from '../middleware/auth.js'
+import { sendPage } from '../server.js'
 import { isAccountDbReady } from '../../db/account.js'
 import { getAllGroups } from '../../db/queries/groups.js'
 import {
@@ -75,6 +76,16 @@ export function registerTenantRoutes(app: FastifyInstance) {
       return { jid, name: names.get(jid) ?? jid, isCommunity, groupCount }
     })
   }
+
+  app.get('/tenants', { preHandler: requireAuth }, async (req, reply) => {
+    generateCsrf(req)
+    return sendPage(reply, 'tenants.html', req)
+  })
+
+  app.get('/tenants/:id', { preHandler: requireAuth }, async (req, reply) => {
+    generateCsrf(req)
+    return sendPage(reply, 'tenant.html', req)
+  })
 
   app.get('/api/tenants', { preHandler: requireAuthApi }, async (_req, reply) => {
     if (rejectNotReady(reply)) return
