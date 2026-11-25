@@ -73,7 +73,7 @@
         for (const jid in childMap) childMap[jid].sort(sortName);
         const topLevel = groups.filter(g => !g.parentCommunityJid).sort(sortName);
 
-        let html = '<table><thead><tr><th>Name</th><th class="num">Members</th><th class="num">Activity (30d)</th><th>Last activity</th><th>Your role</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>Name</th><th>Tenant</th><th class="num">Members</th><th class="num">Activity (30d)</th><th>Last activity</th><th>Your role</th></tr></thead><tbody>';
 
         function addRow(g, indent) {
           const nameText = escHtml(g.name);
@@ -81,10 +81,11 @@
           const name = (indent ? '<span class="indent">' : '') + link
             + (g.isCommunity ? ' <span class="badge badge-community">community</span>' : '')
             + (indent ? '</span>' : '');
+          const tenant = g.tenantId == null ? '<span class="muted">\u2014</span>' : '<a class="group-link" href="/tenants/' + encodeURIComponent(g.tenantId) + '">' + escHtml(g.tenantName) + '</a>';
           const role = g.botMembership === 'none' ? '<span class="muted">-</span>' : '<span class="badge badge-' + g.botMembership + '">' + g.botMembership + '</span>';
           const activity = g.activityCount || 0;
           const lastAct = g.lastActivity ? timeAgo(g.lastActivity) : '<span class="muted">-</span>';
-          html += '<tr><td>' + name + '</td><td class="num">' + (g.memberCount || 0) + '</td><td class="num">' + activity + '</td><td>' + lastAct + '</td><td>' + role + '</td></tr>';
+          html += '<tr><td>' + name + '</td><td>' + tenant + '</td><td class="num">' + (g.memberCount || 0) + '</td><td class="num">' + activity + '</td><td>' + lastAct + '</td><td>' + role + '</td></tr>';
         }
 
         for (const g of topLevel) {

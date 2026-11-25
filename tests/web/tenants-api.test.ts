@@ -221,4 +221,16 @@ describe('tenants api', () => {
     expect(by['c@g.us']).toMatchObject({ tenantId: t, tenantName: 'Alpha' })
     expect(by['free@g.us']).toMatchObject({ tenantId: null, tenantName: null })
   })
+
+  it('group detail names the group tenant, directly or through its community, or null', async () => {
+    seedGroup('c@g.us', 'Comm', { isCommunity: true })
+    seedGroup('k1@g.us', 'Kid1', { parentCommunityJid: 'c@g.us' })
+    seedGroup('solo@g.us', 'Solo')
+    seedGroup('free@g.us', 'Free')
+    const t = seedTenant('Alpha', ['c@g.us', 'solo@g.us'])
+    const detail = async (jid: string) => (await call('GET', `/api/groups/${encodeURIComponent(jid)}`)).json().group.tenant
+    expect(await detail('k1@g.us')).toEqual({ id: t, name: 'Alpha' })
+    expect(await detail('solo@g.us')).toEqual({ id: t, name: 'Alpha' })
+    expect(await detail('free@g.us')).toBeNull()
+  })
 })

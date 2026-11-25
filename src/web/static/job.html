@@ -44,11 +44,13 @@
         const res = await fetch('/api/jobs/' + encodeURIComponent(jobId));
         if (res.status === 401) { window.location.href = '/login'; return; }
         if (!res.ok) { document.getElementById('job-detail').innerHTML = '<p class="loading">Job not found</p>'; return; }
-        const { job, events, groupName, userName } = await res.json();
+        const { job, events, groupName, userName, triggerName, tenantId, tenantName } = await res.json();
         const fmt = (ms) => ms ? new Date(ms).toISOString().replace('T', ' ').slice(0, 19) : '-';
         const fmtS = (s) => s ? new Date(s * 1000).toISOString().replace('T', ' ').slice(0, 19) : '-';
         let html = '<div class="card"><h2 style="font-size:1.05rem;margin:0 0 0.75rem">Job #' + job.id + ' &middot; ' + escHtml(job.jobType)
           + ' <span class="badge st-' + job.status + '">' + job.status + '</span></h2><dl class="props">'
+          + row('Tenant', tenantId != null ? link('/tenants/' + encodeURIComponent(tenantId), tenantName) : '\u2014')
+          + row('Trigger', triggerName == null ? '\u2014' : (tenantId != null ? link('/tenants/' + encodeURIComponent(tenantId) + '/triggers/' + encodeURIComponent(job.triggerId), triggerName) : escHtml(triggerName)))
           + row('Group', job.groupJid ? link('/group/' + encodeURIComponent(job.groupJid), groupName || job.groupJid) : '-')
           + row('User', job.userJid ? link('/user/' + encodeURIComponent(job.userJid), userName || job.userJid) : '-')
           + row('Source message', escHtml(job.messageId || '-'))

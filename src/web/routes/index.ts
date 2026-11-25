@@ -19,9 +19,19 @@ import { getUserActivityPerGroup } from '../../db/queries/activity.js'
 import { HISTORY_IMPORT_MODES, getHistoryImportMode } from '../../whatsapp/handlers/history-sync.js'
 import { registerBackupRoutes } from './backup.js'
 import { registerTenantRoutes } from './tenants.js'
-import { loadMembershipSnapshot, listTenants } from '../../db/queries/tenants.js'
+import { loadMembershipSnapshot, listTenants, getTenant, getTenantIdForGroup } from '../../db/queries/tenants.js'
+import { getTrigger } from '../../db/queries/triggers.js'
 import { tenantOfGroup } from '../../tenants/membership.js'
 import { syncGroups } from '../../whatsapp/handlers/group-sync.js'
+
+/** Names shown next to a job; a trigger that was deleted since shows as 'deleted trigger'. */
+function triggerAndTenantNames(triggerId: number | null): { triggerName: string | null; tenantId: number | null; tenantName: string | null } {
+  if (triggerId === null) return { triggerName: null, tenantId: null, tenantName: null }
+  const trigger = getTrigger(triggerId)
+  if (!trigger) return { triggerName: 'deleted trigger', tenantId: null, tenantName: null }
+  const tenant = getTenant(trigger.tenantId)
+  return { triggerName: trigger.name, tenantId: tenant?.id ?? null, tenantName: tenant?.name ?? null }
+}
 
 export function registerRoutes(app: FastifyInstance) {
   registerBackupRoutes(app)
@@ -198,11 +208,15 @@ export function registerRoutes(app: FastifyInstance) {
       }
     })
 
+    const tenantId = getTenantIdForGroup(jid)
+    const tenant = tenantId === null ? null : getTenant(tenantId)
+
     return reply.send({
       group: {
         ...group.toJSON(),
         memberCount: group.getMemberCount(),
         lastActivity: group.getLastActivity(),
+        tenant: tenant ? { id: tenant.id, name: tenant.name } : null,
       },
       members: enrichedMembers,
     })
@@ -303,6 +317,7 @@ export function registerRoutes(app: FastifyInstance) {
     return reply.send({
       jobs: jobs.map(j => ({
         ...j,
+        ...triggerAndTenantNames(j.triggerId),
         groupName: j.groupJid ? nameByJid.get(j.groupJid) ?? null : null,
         userName: j.userJid ? userNameByJid.get(j.userJid) ?? null : null,
         tokensTotal: j.aiTokensIn + j.aiTokensOut,
@@ -326,6 +341,7 @@ export function registerRoutes(app: FastifyInstance) {
       events: getJobEvents(job.id),
       groupName: job.groupJid ? nameByJid.get(job.groupJid) ?? null : null,
       userName: job.userJid ? getUser(job.userJid)?.displayName ?? null : null,
+      ...triggerAndTenantNames(job.triggerId),
     })
   })
 

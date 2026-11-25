@@ -83,6 +83,7 @@
       <h2 id="group-name">Loading...</h2>
     </div>
     <div class="group-meta" id="group-meta"></div>
+    <div class="group-meta" id="group-tenant"></div>
     <div id="members"><p class="loading">Loading...</p></div>
     <div id="pagination" class="pagination" style="display:none"></div>
     <button class="toggle" id="toggle-left" style="display:none" onclick="toggleLeft()">Show former members</button>
@@ -118,6 +119,10 @@
         const data = await res.json();
         document.getElementById('group-name').textContent = data.group.name;
         document.getElementById('group-meta').textContent = data.group.memberCount + ' members' + (data.group.lastActivity ? ' \u00b7 last active ' + timeAgo(data.group.lastActivity) : '');
+        const t = data.group.tenant;
+        document.getElementById('group-tenant').innerHTML = t
+          ? 'Tenant: <a href="/tenants/' + encodeURIComponent(t.id) + '">' + escHtml(t.name) + '</a>'
+          : 'Not in a tenant';
         allMembers = data.members || [];
         const hasLeft = allMembers.some(m => m.membership === 'none');
         if (hasLeft) document.getElementById('toggle-left').style.display = 'inline';

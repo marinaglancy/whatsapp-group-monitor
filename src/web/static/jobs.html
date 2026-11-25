@@ -96,13 +96,15 @@
           document.getElementById('pagination').style.display = 'none';
           return;
         }
-        let html = '<table><thead><tr><th>#</th><th>Type</th><th>Status</th><th>Group</th><th>User</th><th>Created</th><th class="num">Attempts</th><th class="num">AI calls</th><th class="num">Tokens</th><th>Result / error</th></tr></thead><tbody>';
+        let html = '<table><thead><tr><th>#</th><th>Type</th><th>Status</th><th>Tenant</th><th>Trigger</th><th>Group</th><th>User</th><th>Created</th><th class="num">Attempts</th><th class="num">AI calls</th><th class="num">Tokens</th><th>Result / error</th></tr></thead><tbody>';
         for (const j of data.jobs) {
           const status = '<span class="badge st-' + j.status + '">' + j.status + '</span>';
           const group = j.groupJid ? '<a class="group-link" href="/group/' + encodeURIComponent(j.groupJid) + '">' + escHtml(j.groupName || j.groupJid) + '</a>' : '<span class="muted">-</span>';
+          const tenant = j.tenantId != null ? '<a class="group-link" href="/tenants/' + encodeURIComponent(j.tenantId) + '">' + escHtml(j.tenantName) + '</a>' : '<span class="muted">\u2014</span>';
+          const trigger = j.triggerName == null ? '<span class="muted">\u2014</span>' : (j.tenantId != null ? '<a class="group-link" href="/tenants/' + encodeURIComponent(j.tenantId) + '/triggers/' + encodeURIComponent(j.triggerId) + '">' + escHtml(j.triggerName) + '</a>' : '<span class="muted">' + escHtml(j.triggerName) + '</span>');
           const user = j.userJid ? '<a class="group-link" href="/user/' + encodeURIComponent(j.userJid) + '">' + escHtml(j.userName || j.userJid) + '</a>' : '<span class="muted">-</span>';
           const summary = j.error ? escHtml(j.error.split('\n')[0].slice(0, 80)) : (j.result ? escHtml(JSON.stringify(j.result).slice(0, 80)) : '<span class="muted">-</span>');
-          html += '<tr><td><a class="job-link" href="/job/' + j.id + '"><strong>' + j.id + '</strong></a></td><td>' + escHtml(j.jobType) + '</td><td>' + status + '</td><td>' + group + '</td><td>' + user + '</td><td>' + fmtTs(j.createdAt) + '</td><td class="num">' + j.attempts + '</td><td class="num">' + j.aiCalls + '</td><td class="num">' + j.tokensTotal + '</td><td>' + summary + '</td></tr>';
+          html += '<tr><td><a class="job-link" href="/job/' + j.id + '"><strong>' + j.id + '</strong></a></td><td>' + escHtml(j.jobType) + '</td><td>' + status + '</td><td>' + tenant + '</td><td>' + trigger + '</td><td>' + group + '</td><td>' + user + '</td><td>' + fmtTs(j.createdAt) + '</td><td class="num">' + j.attempts + '</td><td class="num">' + j.aiCalls + '</td><td class="num">' + j.tokensTotal + '</td><td>' + summary + '</td></tr>';
         }
         html += '</tbody></table>';
         document.getElementById('jobs').innerHTML = html;

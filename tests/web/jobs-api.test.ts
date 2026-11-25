@@ -3,6 +3,8 @@ import type { FastifyInstance } from 'fastify'
 import { setupTestDbs } from '../helpers/db.js'
 import { buildTestApp, loginTestApp } from '../helpers/web.js'
 import { seedGroup, seedUser } from '../helpers/fixtures.js'
+import { seedTenant, seedQaTrigger } from '../helpers/fixtures.js'
+import { deleteTrigger } from '../../src/db/queries/triggers.js'
 import { insertJob, failJob, addJobEvent, addJobAiUsage } from '../../src/db/queries/jobs.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
@@ -58,6 +60,25 @@ describe('/api/jobs', () => {
     expect(body.events.map((e: { eventType: string }) => e.eventType)).toEqual(['ai_call', 'reply_sent'])
     expect(body.groupName).toBe('Admins')
     expect(body.userName).toBe('Anna')
+  })
+
+  it('shows the trigger and tenant names on jobs: live, deleted and none', async () => {
+    const tenant = seedTenant('Alpha', ['qa@g.us'])
+    const live = seedQaTrigger(tenant, 'qa@g.us', { name: 'Questions' })
+    const gone = seedQaTrigger(tenant, 'qa@g.us', { name: 'Old' })
+    const jLive = insertJob({ jobType: 'qa_answer', triggerId: live, groupJid: 'qa@g.us', messageId: 'L', runAt: 1 })!
+    const jGone = insertJob({ jobType: 'qa_answer', triggerId: gone, groupJid: 'qa@g.us', messageId: 'G', runAt: 1 })!
+    const jNone = insertJob({ jobType: 'spam_check', groupJid: 'qa@g.us', messageId: 'N', runAt: 1 })!
+    deleteTrigger(gone)
+    const list = (await get('/api/jobs')).json().jobs as Array<{ id: number; triggerName: string | null; tenantName: string | null }>
+    const by = (id: number) => list.find(j => j.id === id)!
+    expect(by(jLive)).toMatchObject({ triggerName: 'Questions', tenantName: 'Alpha' })
+    expect(by(jGone)).toMatchObject({ triggerName: 'deleted trigger', tenantName: null })
+    expect(by(jNone)).toMatchObject({ triggerName: null, tenantName: null })
+    const detail = (await get(`/api/jobs/${jLive}`)).json()
+    expect(detail).toMatchObject({ triggerName: 'Questions', tenantName: 'Alpha' })
+    expect((await get(`/api/jobs/${jGone}`)).json()).toMatchObject({ triggerName: 'deleted trigger', tenantName: null })
+    expect((await get(`/api/jobs/${jNone}`)).json()).toMatchObject({ triggerName: null, tenantName: null })
   })
 
   it('404s on unknown and 400s on non-numeric ids', async () => {
