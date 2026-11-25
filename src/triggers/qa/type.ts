@@ -60,6 +60,7 @@ export class QaTriggerType extends TriggerType<QaTriggerConfig> {
     }
     if (!isInt(c.waitSeconds, 0, 3600)) return { ok: false as const, error: 'Wait must be a whole number from 0 to 3600 seconds' }
     if (!isInt(c.maxAgeMinutes, 1, 1440)) return { ok: false as const, error: 'Maximum age must be a whole number from 1 to 1440 minutes' }
+    if (c.waitSeconds >= c.maxAgeMinutes * 60) return { ok: false as const, error: 'The wait must be shorter than the age limit.' }
     if (typeof c.onlyIfFirst !== 'boolean') return { ok: false as const, error: 'Invalid "only if first" value' }
     if (typeof c.instructions !== 'string' || c.instructions.length > QA_INSTRUCTIONS_MAX) {
       return { ok: false as const, error: `Instructions can be at most ${QA_INSTRUCTIONS_MAX} characters` }
@@ -71,6 +72,17 @@ export class QaTriggerType extends TriggerType<QaTriggerConfig> {
       return { ok: false as const, error: `Error message can be at most ${ERROR_TEMPLATE_MAX} characters` }
     }
     return { ok: true as const, config: c }
+  }
+
+  summarize(config: QaTriggerConfig, groupName: (jid: string) => string): string {
+    let text = `Q&A group: ${groupName(config.qaGroupJid)}`
+    if (config.onlyIfFirst) text += ' · only if no earlier trigger fired'
+    if (config.waitSeconds > 0) text += ` · wait ${config.waitSeconds} s`
+    return text
+  }
+
+  warning(config: QaTriggerConfig, coveredGroupJids: string[]): string | null {
+    return coveredGroupJids.includes(config.qaGroupJid) ? null : 'The Q&A group is not in this tenant'
   }
 
   watches(event: TriggerEvent, config: QaTriggerConfig): boolean {

@@ -25,6 +25,7 @@ class TestType extends TriggerType<TestConfig> {
     return { onlyIfFirst: false, waitSeconds: 0, maxAgeMinutes: 60, errorTemplate: '', match: true }
   }
   validate(raw: unknown) { return { ok: true as const, config: this.normalize(raw as Record<string, unknown>) } }
+  summarize() { return 'test' }
   watches() { return true }
   buildJob(event: TriggerEvent) {
     const r = event.record

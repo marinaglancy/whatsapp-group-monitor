@@ -148,3 +148,17 @@ describe('Q&A trigger type', () => {
     expect(listJobs({ jobType: 'qa_answer', limit: 10, offset: 0 }).jobs).toHaveLength(1)
   })
 })
+
+describe('qa validate: wait versus age limit', () => {
+  it('rejects a wait that is not shorter than the age limit', () => {
+    const res = qaTriggerType.validate(
+      { qaGroupJid: 'qa@g.us', waitSeconds: 600, maxAgeMinutes: 10 },
+      { coveredGroupJids: ['qa@g.us'] },
+    )
+    expect(res).toEqual({ ok: false, error: 'The wait must be shorter than the age limit.' })
+    expect(qaTriggerType.validate(
+      { qaGroupJid: 'qa@g.us', waitSeconds: 599, maxAgeMinutes: 10 },
+      { coveredGroupJids: ['qa@g.us'] },
+    ).ok).toBe(true)
+  })
+})

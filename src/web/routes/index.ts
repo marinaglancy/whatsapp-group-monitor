@@ -18,10 +18,14 @@ import { getUserGroupMemberships } from '../../db/queries/members.js'
 import { getUserActivityPerGroup } from '../../db/queries/activity.js'
 import { HISTORY_IMPORT_MODES, getHistoryImportMode } from '../../whatsapp/handlers/history-sync.js'
 import { registerBackupRoutes } from './backup.js'
+import { registerTenantRoutes } from './tenants.js'
+import { loadMembershipSnapshot, listTenants } from '../../db/queries/tenants.js'
+import { tenantOfGroup } from '../../tenants/membership.js'
 import { syncGroups } from '../../whatsapp/handlers/group-sync.js'
 
 export function registerRoutes(app: FastifyInstance) {
   registerBackupRoutes(app)
+  registerTenantRoutes(app)
   // --- Public: login ---
   app.get('/login', async (req, reply) => {
     if (req.session.authenticated) {
@@ -134,7 +138,14 @@ export function registerRoutes(app: FastifyInstance) {
     }
     const groups = getAllGroups()
     GroupRecord.populateAllSummaries(groups)
-    return reply.send({ groups: groups.map(g => g.toJSON()) })
+    const snapshot = loadMembershipSnapshot()
+    const tenantNames = new Map(listTenants().map(t => [t.id, t.name]))
+    return reply.send({
+      groups: groups.map(g => {
+        const tenantId = tenantOfGroup(g.jid, snapshot.entries, snapshot.groups)
+        return { ...g.toJSON(), tenantId, tenantName: tenantId === null ? null : tenantNames.get(tenantId) ?? null }
+      }),
+    })
   })
 
   app.post('/api/resync', { preHandler: requireAuthApi }, async (req, reply) => {

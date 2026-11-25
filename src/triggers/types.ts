@@ -49,6 +49,12 @@ export abstract class TriggerType<C extends BaseTriggerConfig = BaseTriggerConfi
     ctx: { coveredGroupJids: string[] },
   ): { ok: true; config: C } | { ok: false; error: string }
 
+  /** One line for the tenant page. groupName turns a group jid into its name. */
+  abstract summarize(config: C, groupName: (jid: string) => string): string
+
+  /** A problem with the stored settings that the tenant page should show, or null. */
+  warning(_config: C, _coveredGroupJids: string[]): string | null { return null }
+
   abstract watches(event: TriggerEvent, config: C): boolean
   abstract buildJob(event: TriggerEvent, config: C, ctx: DispatchCtx): JobSpec
 }
