@@ -95,6 +95,30 @@ describe('converting legacy Q&A groups', () => {
     expect(warn).toHaveBeenCalledWith({ jid: 'shared@g.us', tenant: 'Two' }, expect.any(String))
   })
 
+  it('keeps the tenant and its Q&A trigger even when all its groups are taken', () => {
+    makeLegacyDb([
+      { jid: 'a@g.us', name: 'A', fn: 1, at: 1, cfg: { qa: { linkedJids: ['b@g.us'] } } },
+      { jid: 'b@g.us', name: 'B', fn: 1, at: 2, cfg: { qa: { instructions: 'Keep me' } } },
+    ])
+    vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    initAccountDb(PHONE)
+    const b = listTenants().find(t => t.name === 'B')!
+    expect(getTenantEntries(b.id)).toEqual([])
+    expect(listTriggers(b.id)[0]).toMatchObject({ type: 'qa', enabled: true })
+    expect(listTriggers(b.id)[0].config).toMatchObject({ qaGroupJid: 'b@g.us', instructions: 'Keep me' })
+  })
+
+  it('rolls back the tenant tables when the conversion fails, and retries on the next open', () => {
+    makeLegacyDb([{ jid: 'qa@g.us', name: 'Q', fn: 1, cfg: { qa: { linkedJids: [{}] } } }])
+    expect(() => initAccountDb(PHONE)).toThrow()
+    const raw = new Database(join(dir, PHONE, 'account.db'))
+    expect(raw.prepare("SELECT name FROM sqlite_master WHERE name='tenants'").get()).toBeUndefined()
+    raw.prepare('UPDATE groups SET bot_config = ?').run(JSON.stringify({ qa: { linkedJids: [] } }))
+    raw.close()
+    initAccountDb(PHONE)
+    expect(listTenants().map(t => t.name)).toEqual(['Q'])
+  })
+
   it('runs only once: a deleted tenant is not re-created on the next open', () => {
     makeLegacyDb([{ jid: 'qa@g.us', name: 'Q', fn: 1 }])
     initAccountDb(PHONE)

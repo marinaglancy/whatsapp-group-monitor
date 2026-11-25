@@ -127,34 +127,6 @@ export function ensureAccountSchema(sqlite: Database.Database, opts: { legacyQaP
 
     CREATE INDEX IF NOT EXISTS idx_bot_job_events_job ON bot_job_events(job_id);
     CREATE INDEX IF NOT EXISTS idx_bot_job_events_message ON bot_job_events(message_id);
-
-    CREATE TABLE IF NOT EXISTS tenants (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS tenant_groups (
-      jid TEXT PRIMARY KEY,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_tenant_groups_tenant ON tenant_groups(tenant_id);
-
-    CREATE TABLE IF NOT EXISTS bot_triggers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
-      type TEXT NOT NULL,
-      name TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      sort_order INTEGER NOT NULL,
-      config TEXT,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_bot_triggers_tenant_order ON bot_triggers(tenant_id, sort_order);
   `)
 
   // Migrations: drop columns that are no longer needed
@@ -235,10 +207,42 @@ export function ensureAccountSchema(sqlite: Database.Database, opts: { legacyQaP
     END;
   `)
 
-  if (!hadTenants) {
+  // Tenant tables and the one-off Q&A conversion share a transaction: if the
+  // conversion fails, the tables are rolled back too and the next open retries.
+  sqlite.transaction(() => {
+    sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS tenants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tenant_groups (
+      jid TEXT PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tenant_groups_tenant ON tenant_groups(tenant_id);
+
+    CREATE TABLE IF NOT EXISTS bot_triggers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL,
+      config TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bot_triggers_tenant_order ON bot_triggers(tenant_id, sort_order);
+    `)
+    if (hadTenants) return
     const { created, skippedJids } = migrateLegacyQaGroups(sqlite, opts.legacyQaPrompt)
     if (created > 0 || skippedJids.length > 0) logger.info({ created, skipped: skippedJids.length }, 'Converted Q&A groups into tenants')
-  }
+  })()
 }
 
 export function initAccountDb(phone: string) {
@@ -259,7 +263,14 @@ export function initAccountDb(phone: string) {
 
   db = drizzle(sqlite, { schema })
 
-  ensureAccountSchema(sqlite, { legacyQaPrompt: getSetting('ai_system_prompt') })
+  try {
+    ensureAccountSchema(sqlite, { legacyQaPrompt: getSetting('ai_system_prompt') })
+  } catch (err) {
+    sqlite.close()
+    accountSqlite = null
+    db = null
+    throw err
+  }
 
   currentPhone = phone
   logger.info({ phone, path: dbPath }, 'Account database initialized')

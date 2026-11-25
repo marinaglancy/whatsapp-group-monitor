@@ -84,7 +84,6 @@ export function migrateLegacyQaGroups(sqlite: Database.Database, legacyPrompt: s
       skippedJids.push(jid)
     }
     const jids = tenant.jids.filter(j => !conflicts.includes(j))
-    if (jids.length === 0) continue
     const id = insertIncomingTenant(sqlite, { ...tenant, jids })
     for (const jid of jids) entries.set(jid, id)
     created++
