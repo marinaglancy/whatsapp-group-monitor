@@ -8,3 +8,8 @@ export function normalizeText(t: string): string {
 export function bareId(jid: string): string {
   return jid.split(':')[0].split('@')[0]
 }
+
+/** The text on one line: every line break becomes a space. */
+export function singleLine(t: string): string {
+  return t.replace(/[\r\n\v\f\u0085\u2028\u2029]+/g, ' ')
+}
