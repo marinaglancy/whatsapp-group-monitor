@@ -150,12 +150,20 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
     return coveredGroupJids.includes(config.reportGroupJid) ? null : 'Choose a notification group in this tenant'
   }
 
+  /** Whether the groups setting picks the group. The notification group is
+   *  never checked: people there discuss the reports. */
+  selectsGroup(jid: string, config: SpamTriggerConfig): boolean {
+    if (jid === config.reportGroupJid) return false
+    if (config.groupsMode === 'only' && !config.groupJids.includes(jid)) return false
+    if (config.groupsMode === 'except' && config.groupJids.includes(jid)) return false
+    return true
+  }
+
   /** The dispatcher only offers this trigger events from its own tenant's groups,
    *  so only the groups setting and the bot's role are checked here. */
   watches(event: TriggerEvent, config: SpamTriggerConfig): boolean {
     const jid = event.record.groupJid
-    if (config.groupsMode === 'only' && !config.groupJids.includes(jid)) return false
-    if (config.groupsMode === 'except' && config.groupJids.includes(jid)) return false
+    if (!this.selectsGroup(jid, config)) return false
     if (config.botRole === 'any') return true
     const m = getGroup(jid)?.botMembership
     const isAdmin = m === 'admin' || m === 'superadmin'

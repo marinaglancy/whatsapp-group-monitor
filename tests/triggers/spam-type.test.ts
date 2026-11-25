@@ -134,6 +134,18 @@ describe('Spam trigger type', () => {
     expect(spamTriggerType.watches(e('b@g.us'), cfg({ groupsMode: 'except', groupJids: ['a@g.us'] }))).toBe(true)
   })
 
+  it('never watches its own notification group', () => {
+    const e = (g: string) => ev(record({ groupJid: g }))
+    expect(spamTriggerType.watches(e('rep@g.us'), cfg())).toBe(false)
+    expect(spamTriggerType.watches(e('rep@g.us'), cfg({ groupsMode: 'only', groupJids: ['rep@g.us'] }))).toBe(false)
+    expect(spamTriggerType.watches(e('a@g.us'), cfg({ reportGroupJid: 'a@g.us' }))).toBe(false)
+    expect(spamTriggerType.watches(e('rep@g.us'), cfg({ reportGroupJid: 'a@g.us' }))).toBe(true)
+    // the dispatcher makes no job for a message there
+    seedSpamTrigger(tenantId, 'rep@g.us')
+    expect(run(record({ groupJid: 'rep@g.us' }))).toEqual([])
+    expect(run(record({ groupJid: 'b@g.us' }))).toHaveLength(1)
+  })
+
   it('watches by bot role (admin includes superadmin)', () => {
     const e = (g: string) => ev(record({ groupJid: g }))
     expect(spamTriggerType.watches(e('a@g.us'), cfg({ botRole: 'admin' }))).toBe(true)

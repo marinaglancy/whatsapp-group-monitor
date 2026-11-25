@@ -183,7 +183,8 @@
         + '<textarea id="f-instructions" rows="3" placeholder="e.g. Ads for local shops are fine."></textarea></div>'
         + '<div class="field"><label>Actions</label><div class="box"><div class="row">'
         + '<label for="s-report">Post reports and errors to:</label>'
-        + '<select id="s-report" style="width:300px"><option value="">Choose a group...</option>' + reportOptions + '</select></div></div></div>'
+        + '<select id="s-report" style="width:300px"><option value="">Choose a group...</option>' + reportOptions + '</select></div>'
+        + '<div class="muted">Messages in this group are not checked.</div></div></div>'
         + '<div class="field"><label for="f-error">Error message (posted in the group above)</label>'
         + '<textarea id="f-error" rows="2" placeholder="Empty: ' + esc(type.defaultErrorTemplate) + '"></textarea>'
         + '<div class="muted" style="margin-top:.25rem">Placeholders: <code>{{error}}</code> <code>{{trigger}}</code> <code>{{group}}</code> <code>{{user}}</code> <code>{{message}}</code></div></div>';

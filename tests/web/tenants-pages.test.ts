@@ -45,6 +45,7 @@ describe('tenants pages', () => {
     expect(res.body).toContain('draw: spamForm, read: readSpamConfig')
     expect(res.body).toContain('id="spam-groups-popup"')
     expect(res.body).toContain('Post reports and errors to')
+    expect(res.body).toContain('Messages in this group are not checked.')
   })
 
   it('drops watched groups that left the tenant and words the note for one or many', () => {

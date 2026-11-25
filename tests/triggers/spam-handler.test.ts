@@ -489,6 +489,8 @@ describe('spam_check handler: stops', () => {
 
     setConfig({ groupsMode: 'except', groupJids: ['a@g.us'] })
     await expect(handle(copyJob('a@g.us'))).rejects.toThrow('The trigger no longer watches this group')
+    setConfig({ reportGroupJid: 'a@g.us' }) // its own notification group is never checked
+    await expect(handle(copyJob('a@g.us'))).rejects.toThrow('The trigger no longer watches this group')
     setConfig({})
 
     setTenantGroups(tenantId, ['b@g.us', 'rep@g.us'])
