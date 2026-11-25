@@ -195,7 +195,8 @@ Add it with **+ Add trigger** and choose **Spam**. The settings:
   same text in other groups can be seen first), and ignores messages older than 60 minutes.
   Both can be changed.
 - **Post reports and errors to**: the notification group. It must be one of the tenant's
-  groups. Reports and error messages are posted there.
+  groups. Reports and error messages are posted there. Messages in this group are not
+  checked.
 - **Prompt**, **Additional instructions** and **Error message** work as for Mentions. The
   default error message is `⚠️ Spam check failed for a message by {{user}} in {{group}}: {{error}}`.
 
