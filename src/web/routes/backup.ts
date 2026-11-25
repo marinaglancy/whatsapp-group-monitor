@@ -93,11 +93,14 @@ export function mergeAccountDb(phone: string, backupDbPath: string): { skippedTe
   const skippedTenants: { name: string; conflicts: string[] }[] = []
   const mainDbPath = resolve(config.dataDir, phone, 'account.db')
   const db = new Database(mainDbPath)
-  db.pragma('foreign_keys = OFF')
-  // a live database the new code never opened has no tenants yet; convert its own Q&A groups first
-  ensureAccountSchema(db, { legacyQaPrompt: getSetting('ai_system_prompt') })
-  const escaped = backupDbPath.replace(/'/g, "''")
-  db.exec(`ATTACH DATABASE '${escaped}' AS backup`)
+  let attached = false
+  try {
+    db.pragma('foreign_keys = OFF')
+    // a live database the new code never opened has no tenants yet; convert its own Q&A groups first
+    ensureAccountSchema(db, { legacyQaPrompt: getSetting('ai_system_prompt') })
+    const escaped = backupDbPath.replace(/'/g, "''")
+    db.exec(`ATTACH DATABASE '${escaped}' AS backup`)
+    attached = true
 
   db.transaction(() => {
     // Insert new users; then merge fields for existing ones via correlated UPDATE
@@ -177,9 +180,14 @@ export function mergeAccountDb(phone: string, backupDbPath: string): { skippedTe
     }
   })()
 
-  db.exec('DETACH DATABASE backup')
-  db.pragma('foreign_keys = ON')
-  db.close()
+  } finally {
+    try {
+      if (attached) db.exec('DETACH DATABASE backup')
+      db.pragma('foreign_keys = ON')
+    } finally {
+      db.close()
+    }
+  }
   return { skippedTenants }
 }
 

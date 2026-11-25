@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { join } from 'path'
+import Database from 'better-sqlite3'
 import { setupTestDbs, TEST_PHONE } from '../helpers/db.js'
 import { seedGroup } from '../helpers/fixtures.js'
 import { getGroup } from '../../src/db/queries/groups.js'
@@ -104,5 +105,50 @@ describe('mergeAccountDb tenants', () => {
     expect(t.name).toBe('Live Q&A')
     expect(getTenantEntries(t.id)).toEqual(['live-qa@g.us'])
     expect(listTriggers(t.id)).toHaveLength(1)
+  })
+
+  it('skips the second backup tenant when it shares a group with the first', () => {
+    const backupPath = join(dbs.dir, 'shared.db')
+    makeBackupDb(backupPath, NEW_GROUPS_DDL + ';' + TENANT_DDL, `
+      ${GROUP_INSERT} ('a@g.us', 'A', 0, 'participant', 0, 0, 1700000000000, NULL),
+                      ('b@g.us', 'B', 0, 'participant', 0, 0, 1700000000000, NULL);
+      INSERT INTO tenants VALUES (1, 'First', 1, 1), (2, 'Second', 1, 1);
+      INSERT INTO tenant_groups VALUES ('a@g.us', 1), ('b@g.us', 2);`)
+    // make the second share a jid: tenant_groups.jid is unique, so use a community parent instead
+    const raw = new Database(backupPath)
+    raw.exec(`UPDATE groups SET is_community = 1 WHERE jid = 'a@g.us'; UPDATE groups SET parent_community_jid = 'a@g.us' WHERE jid = 'b@g.us'`)
+    raw.close()
+    const result = mergeAccountDb(TEST_PHONE, backupPath)
+    expect(result.skippedTenants).toEqual([{ name: 'Second', conflicts: ['b@g.us'] }])
+    expect(listTenants().map(t => t.name)).toEqual(['First'])
+  })
+
+  it('finds a conflict through a community that only the backup knows as the group\'s parent', () => {
+    seedGroup('comm@g.us', 'Community', { isCommunity: true })
+    seedTenant('Live', ['comm@g.us'])
+    const backupPath = join(dbs.dir, 'child.db')
+    makeBackupDb(backupPath, NEW_GROUPS_DDL + ';' + TENANT_DDL, `
+      INSERT INTO groups (jid, name, is_community, parent_community_jid, bot_membership, bot_functions, is_archived, created_at, bot_config)
+        VALUES ('child@g.us', 'Child', 0, 'comm@g.us', 'participant', 0, 0, 1700000000000, NULL);
+      INSERT INTO tenants VALUES (1, 'Child tenant', 1, 1);
+      INSERT INTO tenant_groups VALUES ('child@g.us', 1);`)
+    const result = mergeAccountDb(TEST_PHONE, backupPath)
+    expect(result.skippedTenants).toEqual([{ name: 'Child tenant', conflicts: ['child@g.us'] }])
+    expect(listTenants().map(t => t.name)).toEqual(['Live'])
+  })
+
+  it('leaves nothing behind when a tenant fails halfway', () => {
+    const backupPath = join(dbs.dir, 'broken.db')
+    makeBackupDb(backupPath, NEW_GROUPS_DDL + ';' + TENANT_DDL.replace('name TEXT NOT NULL, enabled', 'name TEXT, enabled'), `
+      ${GROUP_INSERT} ('a@g.us', 'A', 0, 'participant', 0, 0, 1700000000000, NULL);
+      INSERT INTO tenants VALUES (1, 'Broken', 1, 1);
+      INSERT INTO tenant_groups VALUES ('a@g.us', 1);
+      INSERT INTO bot_triggers VALUES (1, 1, 'qa', NULL, 1, 1, '{}', 1, 1);`)
+    expect(() => mergeAccountDb(TEST_PHONE, backupPath)).toThrow()
+    expect(listTenants()).toEqual([])
+    expect(getGroup('a@g.us')).toBeNull()
+    const raw = getAccountDb().$client
+    expect(raw.prepare('SELECT count(*) n FROM tenant_groups').get()).toEqual({ n: 0 })
+    expect(raw.prepare('SELECT count(*) n FROM bot_triggers').get()).toEqual({ n: 0 })
   })
 })
