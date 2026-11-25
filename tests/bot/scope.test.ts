@@ -4,7 +4,7 @@ import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedTenant } from '../helpers/fixtures.js'
 import { resolveTenantScope } from '../../src/bot/scope.js'
 import { getAccountDb } from '../../src/db/account.js'
-import { groups } from '../../src/db/schema.js'
+import { groups, tenantGroups } from '../../src/db/schema.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
 beforeEach(() => {
@@ -73,6 +73,17 @@ describe('resolveTenantScope', () => {
     expect(scope.entries.find(e => e.jid === 'left@g.us')).toBeUndefined()
     const comm = scope.entries.find(e => e.jid === 'comm@g.us')!
     expect(comm.children.map(c => c.name).sort()).toEqual(['Alpha', 'Beta'])
+  })
+
+  it('leaves out a community group that belongs to another tenant through its own entry', () => {
+    const a = seedTenant('A', [])
+    const b = seedTenant('B', ['comm@g.us'])
+    // setTenantGroups refuses this overlap, so insert the row directly (it can arise when a group moves into a community)
+    getAccountDb().insert(tenantGroups).values({ jid: 'a@g.us', tenantId: a }).run()
+    const scopeB = resolveTenantScope(b, 'qa@g.us')
+    expect(scopeB.groupJids.sort()).toEqual(['b@g.us', 'qa@g.us'])
+    expect(scopeB.entries.find(e => e.jid === 'comm@g.us')!.children.map(c => c.jid)).toEqual(['b@g.us'])
+    expect(resolveTenantScope(a, 'qa@g.us').groupJids).toEqual(['qa@g.us', 'a@g.us'])
   })
 
   it('puts a group added to the community later in scope without touching the tenant', () => {

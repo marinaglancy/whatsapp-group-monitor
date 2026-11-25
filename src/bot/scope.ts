@@ -1,5 +1,6 @@
-import { getTenantEntries } from '../db/queries/tenants.js'
+import { getTenantEntries, loadMembershipSnapshot } from '../db/queries/tenants.js'
 import { getAllGroups } from '../db/queries/groups.js'
+import { tenantOfGroup } from '../tenants/membership.js'
 
 export interface QaScopeEntry {
   jid: string
@@ -17,16 +18,19 @@ export interface QaScope {
 }
 
 /** Resolve a tenant's direct entries into concrete group jids.
- *  Communities expand to their current children; vanished jids are dropped.
+ *  Communities expand to their current children that belong to this tenant
+ *  (not those entered directly in another tenant); vanished jids are dropped.
  *  The asking group is always in scope (first, marked isSelf) — members
  *  expect the bot to be aware of the conversation it lives in. */
 export function resolveTenantScope(tenantId: number, selfJid: string): QaScope {
-  return resolveScope(selfJid, getTenantEntries(tenantId))
+  const { entries, groups } = loadMembershipSnapshot()
+  const belongs = (jid: string) => tenantOfGroup(jid, entries, groups) === tenantId
+  return resolveScope(selfJid, getTenantEntries(tenantId), belongs)
 }
 
 /** The asking group (selfJid) first, then each entry jid: a community adds
- *  its children, a single group itself. */
-function resolveScope(selfJid: string, entryJids: string[]): QaScope {
+ *  its children that `belongs` accepts, a single group itself. */
+function resolveScope(selfJid: string, entryJids: string[], belongs: (jid: string) => boolean): QaScope {
   const all = getAllGroups() // linkAll() already applied inside
   const byJid = new Map(all.map(g => [g.jid, g]))
   const self = byJid.get(selfJid)
@@ -55,7 +59,7 @@ function resolveScope(selfJid: string, entryJids: string[]): QaScope {
     if (g.isCommunity) {
       // only children the bot is still a member of — data stops flowing after it leaves
       const children = g.getChildren()
-        .filter(c => c.botMembership !== 'none')
+        .filter(c => c.botMembership !== 'none' && belongs(c.jid))
         .map(c => ({ jid: c.jid, name: c.name }))
       entries.push({ jid: g.jid, name: g.name, isCommunity: true, children })
       for (const c of children) addGroup(c.jid, c.name)
