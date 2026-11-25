@@ -65,7 +65,9 @@ Each trigger has a name, an on/off switch and a place in the run order. Triggers
 bottom, and you can drag them to reorder. A trigger can be set to run only if no earlier
 trigger fired for the same event.
 
-Currently there is one trigger type: **Mentions**: the AI Q&A assistant, which answers when someone @mentions the bot or replies to it. Members of one
+There are two trigger types: **Mentions** and **Spam** (see [Spam trigger](#spam-trigger) below).
+
+**Mentions** is the AI Q&A assistant, which answers when someone @mentions the bot or replies to it. Members of one
 chosen group (the Q&A group) can ask the bot questions about activity in the other groups of
 the tenant: message counts, conversation summaries, most/least active members, poll
 attendance.
@@ -171,6 +173,74 @@ When the bot answers, message content from the tenant's groups is sent to Google
 Gemini API. On the **free tier Google uses submitted content to improve its products
 (including human review); the paid tier does not.** If the groups are private,
 use a paid-tier API key. See Google's current Gemini API terms for details.
+
+### Spam trigger
+
+The **Spam** trigger looks at new messages in the tenant's groups, asks the AI whether a
+message is spam, and reports what it finds to a group of your choice. **This version only
+reports.** It does not delete messages or remove users; that comes in a later version.
+
+Add it with **+ Add trigger** and choose **Spam**. The settings:
+
+- **Watched groups**: all groups of the tenant, only the selected groups, or all groups
+  except the selected ones. You can also limit it by the bot's role in the group (any, admin,
+  or not an admin), checked when the message arrives.
+- **Conditions**: a message is only checked if all the ticked conditions are true.
+  - **The message content matches**: it has a link, it has an image, or its text matches a
+    pattern (a regular expression). Any one of these is enough. Defaults: link and image.
+  - **The sender is not an admin** (on by default).
+  - **The sender joined less than N days ago** (off by default).
+  - **The sender has fewer than N messages in this group** (off by default).
+- **Timing**: the bot waits 10 seconds before checking (so a quick delete or a copy of the
+  same text in other groups can be seen first), and ignores messages older than 60 minutes.
+  Both can be changed.
+- **Post reports and errors to**: the notification group. It must be one of the tenant's
+  groups. Reports and error messages are posted there.
+- **Prompt**, **Additional instructions** and **Error message** work as for Mentions. The
+  default error message is `⚠️ Spam check failed for a message by {{user}} in {{group}}: {{error}}`.
+
+The AI only reads. It can look at the sender (when they joined, what else they posted, the
+same text in other groups) with the same read-only data tools as Mentions, and it answers
+two questions: is the message **spam**, and is the sender a **spammer**. A long-time member
+who posts one ad is spam but not a spammer. If the AI says the message is not spam, nothing
+is posted.
+
+**Reports** use `@` mentions, so users and groups are tappable. If the sender is a spammer:
+
+```
+Detected spam by user @<user>:
+
+*Not deleted!*
+- group @<group>
+- group @<group>
+
+*Deleted message contents:*
+<text>
+```
+
+If the message is spam but the sender is not judged a spammer:
+
+```
+Suspicious message by user @<user>
+
+*Not deleted:*
+- group @<group>
+
+<text>
+```
+
+The same text from the same user is often posted in several groups. If the trigger already
+reported that user and text less than about 15 minutes ago (the time WhatsApp allows for
+editing a message), the earlier report is **edited** to add the new group instead of posting
+a new one, and the AI's earlier verdict is reused, so a wave of copies costs one AI call.
+Messages without text are never merged. If editing would lose the tappable group mentions,
+a new report is posted instead.
+
+Errors (for example the AI is busy or the daily limit is reached) are posted to the
+notification group at most once every 10 minutes per trigger; the rest only go to the job
+log. Every check is a `spam_check` job on the **Bot jobs** page, with the AI's verdict in
+its log. As with Mentions, the text of checked messages is sent to the Gemini API (see the
+privacy note above).
 
 ## Environment Variables
 
