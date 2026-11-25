@@ -182,6 +182,23 @@ describe('tenants api', () => {
     expect(upd.json().error).toBe('Pick a group that belongs to this tenant')
   })
 
+  it('keeps a trigger switched off unless the request says otherwise', async () => {
+    seedGroup('a@g.us', 'A')
+    const t = seedTenant('One', ['a@g.us'])
+    const id = seedQaTrigger(t, 'a@g.us', { enabled: false })
+    const config = { qaGroupJid: 'a@g.us' }
+    expect((await call('PUT', `/api/triggers/${id}`, { name: 'N', config })).statusCode).toBe(200)
+    expect(getTrigger(id)!.enabled).toBe(false)
+    const bad = await call('PUT', `/api/triggers/${id}`, { name: 'N', enabled: 'no', config })
+    expect(bad.statusCode).toBe(400)
+    expect(bad.json().error).toBe('The enabled value must be true or false')
+    const badPost = await call('POST', `/api/tenants/${t}/triggers`, { type: 'qa', name: 'N', enabled: 1, config })
+    expect(badPost.statusCode).toBe(400)
+    expect(badPost.json().error).toBe('The enabled value must be true or false')
+    const created = await call('POST', `/api/tenants/${t}/triggers`, { type: 'qa', name: 'N', config })
+    expect(getTrigger(created.json().id)!.enabled).toBe(true)
+  })
+
   it('describes a trigger type for the new-trigger page', async () => {
     seedGroup('a@g.us', 'A')
     const t = seedTenant('One', ['a@g.us'])

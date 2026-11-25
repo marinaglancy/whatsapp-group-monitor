@@ -15,6 +15,7 @@ import { registerBuiltinTriggerTypes } from '../../triggers/index.js'
 import { DEFAULT_QA_SYSTEM_PROMPT, QA_DEFAULT_ERROR_TEMPLATE } from '../../triggers/qa/defaults.js'
 
 const NAME_MAX = 100
+const ENABLED_ERROR = 'The enabled value must be true or false'
 
 type AnyBody = Record<string, unknown>
 
@@ -197,6 +198,7 @@ export function registerTenantRoutes(app: FastifyInstance) {
     const id = parseId((req.params as { id: string }).id)
     if (id === null || !getTenant(id)) return reply.status(404).send({ error: 'Tenant not found' })
     const body = bodyOf(req)
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') return reply.status(400).send({ error: ENABLED_ERROR })
     const type = typeof body.type === 'string' ? getTriggerType(body.type) : null
     if (!type) return reply.status(400).send({ error: 'Unknown trigger type' })
     const name = cleanName(body.name)
@@ -204,7 +206,7 @@ export function registerTenantRoutes(app: FastifyInstance) {
     const result = type.validate(body.config, { coveredGroupJids: getTenantCoveredGroupJids(id) })
     if (!result.ok) return reply.status(400).send({ error: result.error })
     const triggerId = createTrigger({
-      tenantId: id, type: type.id, name, enabled: body.enabled !== false,
+      tenantId: id, type: type.id, name, enabled: body.enabled ?? true,
       config: result.config as unknown as Record<string, unknown>,
     })
     return reply.send({ id: triggerId })
@@ -247,12 +249,13 @@ export function registerTenantRoutes(app: FastifyInstance) {
     const type = trigger ? getTriggerType(trigger.type) : null
     if (!trigger || !type) return reply.status(404).send({ error: 'Trigger not found' })
     const body = bodyOf(req)
+    if (body.enabled !== undefined && typeof body.enabled !== 'boolean') return reply.status(400).send({ error: ENABLED_ERROR })
     const name = cleanName(body.name)
     if (!name) return reply.status(400).send({ error: `The name must be 1 to ${NAME_MAX} characters` })
     const result = type.validate(body.config, { coveredGroupJids: getTenantCoveredGroupJids(trigger.tenantId) })
     if (!result.ok) return reply.status(400).send({ error: result.error })
     updateTrigger(trigger.id, {
-      name, enabled: body.enabled !== false, config: result.config as unknown as Record<string, unknown>,
+      name, enabled: body.enabled ?? trigger.enabled, config: result.config as unknown as Record<string, unknown>,
     })
     return reply.send({ ok: true })
   })
@@ -262,7 +265,7 @@ export function registerTenantRoutes(app: FastifyInstance) {
     const id = parseId((req.params as { id: string }).id)
     if (id === null || !getTrigger(id)) return reply.status(404).send({ error: 'Trigger not found' })
     const { enabled } = bodyOf(req)
-    if (typeof enabled !== 'boolean') return reply.status(400).send({ error: 'enabled must be true or false' })
+    if (typeof enabled !== 'boolean') return reply.status(400).send({ error: ENABLED_ERROR })
     setTriggerEnabled(id, enabled)
     return reply.send({ ok: true })
   })
