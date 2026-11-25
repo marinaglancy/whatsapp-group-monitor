@@ -593,12 +593,21 @@ describe('spam errors', () => {
     expect(posts).toEqual([])
   })
 
-  it('posts nothing when the notification group is not in the tenant', async () => {
+  it('posts nothing when the notification group is not in the tenant, and the next error may still post', async () => {
     seedGroup('elsewhere@g.us', 'Elsewhere')
     setConfig({ reportGroupJid: 'elsewhere@g.us' })
+    const notify = notifier()
     const job = copyJob('a@g.us')
-    await notifier()(job, 'no key', fail)
+    await notify(job, 'no key', fail)
     expect(posts).toEqual([])
-    expect(getJobEvents(job.id).at(-1)).toMatchObject({ eventType: 'error_sent', groupJid: null, messageId: null })
+    expect(getJobEvents(job.id)).toEqual([])
+
+    // nothing was posted, so the 10 minutes did not start
+    setConfig({})
+    clock += 60_000
+    const next = copyJob('b@g.us')
+    await notify(next, 'no key', fail)
+    expect(posts.map(p => p.groupJid)).toEqual(['rep@g.us'])
+    expect(getJobEvents(next.id).at(-1)).toMatchObject({ eventType: 'error_sent', groupJid: 'rep@g.us', messageId: 'ERR1' })
   })
 })

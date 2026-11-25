@@ -212,6 +212,29 @@ describe('trigger error notifier with a throttled target', () => {
     expect(sent.map(s => s.jobId)).toEqual([second.id])
   })
 
+  it('a send that posts nothing does not count as a post and is only logged', async () => {
+    const logged = vi.spyOn(logger, 'info').mockImplementation(() => undefined)
+    let posting = false
+    const notify = buildTriggerErrorNotifier(target({
+      send: async (job, trigger, text) => {
+        if (!posting) return null
+        sent.push({ text, jobId: job.id, triggerId: trigger.id })
+        return { groupJid: 'reports@g.us', messageId: 'ERR' }
+      },
+    }), () => clock)
+    const first = reportJob('one')
+    await notify(first, 'x', fail)
+    expect(getJobEvents(first.id)).toEqual([])
+    expect(logged).toHaveBeenCalledWith(expect.objectContaining({ jobId: first.id }), 'Error message not posted: nowhere to post it')
+
+    posting = true
+    clock += 60_000 // well within the period
+    const second = reportJob('two')
+    await notify(second, 'x', fail)
+    expect(sent.map(s => s.jobId)).toEqual([second.id])
+    expect(getJobEvents(second.id)[0]).toMatchObject({ eventType: 'error_sent', groupJid: 'reports@g.us', messageId: 'ERR' })
+  })
+
   it('silent cases do not use up the period', async () => {
     const notify = buildTriggerErrorNotifier(target(), () => clock)
     const answered = reportJob('done')

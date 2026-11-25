@@ -14,7 +14,7 @@ export const ERROR_MESSAGE_TEXT_MAX = 200
 /** Where a trigger type posts its errors. */
 export interface ErrorTarget {
   /** Post the rendered error text; returns the group it was posted in and the
-   *  message id, recorded on the error_sent event. */
+   *  message id, recorded on the error_sent event, or null when it posted nothing. */
   send(job: BotJob, trigger: BotTrigger, text: string): Promise<{ groupJid: string; messageId: string | null } | null>
   /** At most one post per trigger in this period; others are only logged. 0 = no throttle. */
   throttleMs: number
@@ -62,15 +62,22 @@ export function buildTriggerErrorNotifier(target: ErrorTarget, now: () => number
       }
       lastPostAt.set(trigger.id, t)
     }
+    // nothing was posted: the next error may try again
+    const giveBackSlot = () => {
+      if (target.throttleMs <= 0) return
+      if (previous === undefined) lastPostAt.delete(trigger.id)
+      else lastPostAt.set(trigger.id, previous)
+    }
     try {
       const posted = await target.send(job, trigger, text)
-      addJobEvent(job.id, 'error_sent', { groupJid: posted?.groupJid ?? null, messageId: posted?.messageId ?? null })
-    } catch (sendErr) {
-      // nothing was posted: the next error may try again
-      if (target.throttleMs > 0) {
-        if (previous === undefined) lastPostAt.delete(trigger.id)
-        else lastPostAt.set(trigger.id, previous)
+      if (!posted) {
+        giveBackSlot()
+        logger.info({ jobId: job.id, triggerId: trigger.id, text }, 'Error message not posted: nowhere to post it')
+        return
       }
+      addJobEvent(job.id, 'error_sent', { groupJid: posted.groupJid, messageId: posted.messageId })
+    } catch (sendErr) {
+      giveBackSlot()
       logger.error({ err: sendErr, jobId: job.id }, 'Failed to send the error message')
     }
   }
