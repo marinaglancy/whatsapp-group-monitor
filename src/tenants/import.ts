@@ -110,6 +110,7 @@ export function migrateLegacyQaGroups(sqlite: Database.Database, legacyPrompt: s
   })), legacyPrompt)
 
   const { entries, groups } = readMembershipSnapshot(sqlite)
+  const tenantName = sqlite.prepare('SELECT name FROM tenants WHERE id = ?')
   const skippedJids: string[] = []
   let created = 0
   for (const tenant of legacy) {
@@ -125,6 +126,14 @@ export function migrateLegacyQaGroups(sqlite: Database.Database, legacyPrompt: s
       skippedJids.push(jid)
     }
     const jids = tenant.jids.filter(j => !conflicts.includes(j))
+    // A community brings all its groups, but one already in an earlier tenant stays there.
+    for (const jid of conflicts.filter(j => !tenant.jids.includes(j))) {
+      const community = groups.get(jid)?.parentCommunityJid
+      if (!community || !jids.includes(community)) continue
+      const earlier = tenantName.get(entries.get(jid)) as { name: string } | undefined
+      logger.warn({ jid, community, tenant: tenant.name, earlierTenant: earlier?.name ?? '?' },
+        'A group of the converted community already belongs to an earlier tenant: it stays with the earlier tenant')
+    }
     if (!jids.some(j => j !== qaJid)) {
       logger.warn({ tenant: tenant.name }, `The converted tenant has no group besides its Q&A group: its questions will get "${ERROR_TEXT.noOtherGroups}"`)
     }

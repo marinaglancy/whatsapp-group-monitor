@@ -111,6 +111,27 @@ describe('converting legacy Q&A groups', () => {
     expect(warn.mock.calls.some(c => (c[0] as { jid?: string }).jid === 'kid@g.us')).toBe(false)
   })
 
+  it('warns when a converted community holds a group that stays with an earlier tenant', () => {
+    makeLegacyDb([
+      { jid: 'one@g.us', name: 'One', fn: 1, at: 1, cfg: { qa: { linkedJids: ['kid@g.us'] } } },
+      { jid: 'two@g.us', name: 'Two', fn: 1, at: 2, cfg: { qa: { linkedJids: ['comm@g.us'] } } },
+      { jid: 'three@g.us', name: 'Three', fn: 1, at: 3, cfg: { qa: { linkedJids: ['comm@g.us'] } } },
+      { jid: 'comm@g.us', name: 'Community', comm: 1 },
+      { jid: 'kid@g.us', name: 'Kid', parent: 'comm@g.us' },
+    ])
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    initAccountDb(PHONE)
+    const byName = Object.fromEntries(listTenants().map(t => [t.name, getTenantEntries(t.id).sort()]))
+    expect(byName).toEqual({ One: ['kid@g.us', 'one@g.us'], Two: ['comm@g.us', 'two@g.us'], Three: ['three@g.us'] })
+    expect(warn).toHaveBeenCalledWith(
+      { jid: 'kid@g.us', community: 'comm@g.us', tenant: 'Two', earlierTenant: 'One' },
+      expect.stringContaining('stays with the earlier tenant'),
+    )
+    // Three's community was left out, so there is no community overlap to report for it
+    expect(warn.mock.calls.some(c => (c[0] as { jid?: string; tenant?: string }).jid === 'kid@g.us'
+      && (c[0] as { tenant?: string }).tenant === 'Three')).toBe(false)
+  })
+
   it('warns that questions will not be answered when the tenant\'s own Q&A group is taken', () => {
     makeLegacyDb([
       { jid: 'a@g.us', name: 'A', fn: 1, at: 1, cfg: { qa: { linkedJids: ['b@g.us'] } } },
