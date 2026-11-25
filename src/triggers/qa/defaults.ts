@@ -1,8 +1,8 @@
 import type { QaTriggerConfig } from './type.js'
 
-/** The main Q&A system prompt (instance-wide, editable in Settings). The
- *  responder appends the current date, the linked-group listing and the
- *  Q&A group's own instructions around it — those parts stay in code. */
+/** The default prompt of the Q&A trigger type, used when a trigger's own
+ *  prompt is empty. Code adds the date, the tenant's groups, the trigger's
+ *  instructions and the answer format around it. */
 export const DEFAULT_QA_SYSTEM_PROMPT = [
   'You are the assistant of a WhatsApp group-monitoring bot. Group members ask you questions about activity in the groups you can report on. You answer using ONLY data returned by your tools.',
   'Your own account id is {{botlid}}: messages authored by that id are your own earlier replies, and a token @{{botlid}} in a question is addressing you.',
