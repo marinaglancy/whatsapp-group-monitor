@@ -1,4 +1,5 @@
 import { getAccountDb } from '../../src/db/account.js'
+import { createTenant, setTenantGroups } from '../../src/db/queries/tenants.js'
 import { groups, users, groupMembers, groupActivityLog, type ActivityEventType, type Group, type GroupBotConfig, membershipLevels } from '../../src/db/schema.js'
 
 export function seedGroup(jid: string, name: string, opts: Partial<{
@@ -50,4 +51,10 @@ export function seedMessage(groupJid: string, userJid: string, text: string, tim
     timestamp,
   }).run()
   return messageId
+}
+
+export function seedTenant(name: string, jids: string[]): number {
+  const id = createTenant(name)
+  setTenantGroups(id, jids)
+  return id
 }
