@@ -73,7 +73,7 @@ describe('spam flow end-to-end', () => {
     expect(jobs[0].result).toMatchObject({ verdict: { isspam: true, isspammer: true }, report: 'posted', reportMessageId: 'REP1' })
     expect(posts).toEqual([{
       groupJid: '999@g.us',
-      text: `Detected spam by user @555123:\n\n*Not deleted!*\n- group @111\n\n*Deleted message contents:*\n${TEXT}`,
+      text: `Detected spam by user @555123:\n\n*Not deleted!*\n- group @111\n\n*Message contents:*\n${TEXT}`,
     }])
     expect(getJobEvents(jobs[0].id).map(e => e.eventType)).toEqual(['ai_call', 'report_posted'])
   })

@@ -24,7 +24,7 @@ export function spammerReport(s: {
     groupSection('*Not deleted!*', s.notDeleted),
     groupSection('*Deleted messages:*', s.deleted),
     s.removal ? s.removal : null,
-    `*Deleted message contents:*\n${s.contents}`,
+    `*Message contents:*\n${s.contents}`,
   ])
 }
 

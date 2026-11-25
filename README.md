@@ -215,7 +215,7 @@ Detected spam by user @<user>:
 - group @<group>
 - group @<group>
 
-*Deleted message contents:*
+*Message contents:*
 <text>
 ```
 

@@ -12,15 +12,15 @@ describe('normalizeText', () => {
 describe('spammerReport', () => {
   it('has both sections and a removal line', () => {
     expect(spammerReport({ userJid: U, contents: 'Buy now', notDeleted: ['1@g.us', '2@g.us'], deleted: ['3@g.us'], removal: 'User removed from the community' }))
-      .toBe('Detected spam by user @123:\n\n*Not deleted!*\n- group @1\n- group @2\n\n*Deleted messages:*\n- group @3\n\nUser removed from the community\n\n*Deleted message contents:*\nBuy now')
+      .toBe('Detected spam by user @123:\n\n*Not deleted!*\n- group @1\n- group @2\n\n*Deleted messages:*\n- group @3\n\nUser removed from the community\n\n*Message contents:*\nBuy now')
   })
   it('has only not-deleted and no removal line', () => {
     expect(spammerReport({ userJid: U, contents: 'x', notDeleted: ['1@g.us'], deleted: [] }))
-      .toBe('Detected spam by user @123:\n\n*Not deleted!*\n- group @1\n\n*Deleted message contents:*\nx')
+      .toBe('Detected spam by user @123:\n\n*Not deleted!*\n- group @1\n\n*Message contents:*\nx')
   })
   it('keeps line breaks in the contents', () => {
     expect(spammerReport({ userJid: U, contents: 'a\n\nb', notDeleted: ['1@g.us'], deleted: [] }))
-      .toContain('*Deleted message contents:*\na\n\nb')
+      .toContain('*Message contents:*\na\n\nb')
   })
 })
 

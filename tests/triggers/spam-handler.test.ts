@@ -101,7 +101,7 @@ function spammerText(groups: string[], contents = TEXT): string {
   return [
     'Detected spam by user @spammer:',
     ['*Not deleted!*', ...groups.map(g => `- group @${g}`)].join('\n'),
-    `*Deleted message contents:*\n${contents}`,
+    `*Message contents:*\n${contents}`,
   ].join('\n\n')
 }
 
@@ -196,7 +196,7 @@ describe('spam_check handler: verdicts', () => {
   it('cuts a very long text in the report', async () => {
     const long = 'Buy now https://x.y/deal ' + 'x'.repeat(5_000)
     await makeHandler(fakeProvider([verdict(true, true)]))(copyJob('a@g.us', long))
-    const contents = posts[0].text.split('*Deleted message contents:*\n')[1]
+    const contents = posts[0].text.split('*Message contents:*\n')[1]
     expect(contents.length).toBeLessThan(3_100)
     expect(contents.endsWith('…')).toBe(true)
     expect(long.startsWith(contents.slice(0, -1))).toBe(true)
