@@ -5,7 +5,7 @@ import { fakeProvider } from '../helpers/fake-provider.js'
 import { updateBotUser } from '../../src/whatsapp/handlers/connection.js'
 import { setSetting } from '../../src/db/queries/settings.js'
 import { setTenantGroups } from '../../src/db/queries/tenants.js'
-import { updateTrigger, deleteTrigger } from '../../src/db/queries/triggers.js'
+import { updateTrigger, deleteTrigger, setTriggerEnabled } from '../../src/db/queries/triggers.js'
 import { insertJob, getJob, getJobEvents, addJobEvent, addJobAiUsage } from '../../src/db/queries/jobs.js'
 import {
   createQaAnswerHandler, buildTriggerErrorNotifier, isTransientAiError, buildFinalRoundMessages,
@@ -430,6 +430,20 @@ describe('qa_answer handler', () => {
     expect(sent).toEqual([])
     expect(getJobEvents(old.id)).toEqual([])
     expect(getJobEvents(orphan.id)).toEqual([])
+  })
+
+  it.each([
+    ['the trigger is switched off', () => setTriggerEnabled(triggerId, false), 'The trigger was switched off'],
+    ['its Q&A group was changed', () => setTriggerConfig({ qaGroupJid: 'a@g.us' }), "The trigger's Q&A group was changed"],
+    ['the group left the tenant', () => setTenantGroups(tenantId, ['a@g.us']), "The group is no longer in this trigger's tenant"],
+  ])('fails quietly for a queued job when %s', async (_name, change, message) => {
+    const provider = fakeProvider([])
+    const job = makeJob()
+    change()
+    await expect(makeHandler(provider)(job)).rejects.toThrow(new TriggerGoneError(message))
+    await makeNotifier()(job, 'x', new TriggerGoneError(message))
+    expect(provider.calls.length).toBe(0)
+    expect(sent).toEqual([])
   })
 
   it('does not double-send after a crash between send and completion', async () => {

@@ -14,6 +14,7 @@ import { resolveTenantScope, type QaScope } from './scope.js'
 import { getBotUser } from '../whatsapp/handlers/connection.js'
 import { getCreationRecord } from '../db/queries/activity.js'
 import { getJob, addJobAiUsage, addJobEvent, getJobEvents, hasJobEvent, sumAiCallsToday } from '../db/queries/jobs.js'
+import { getTenantIdForGroup } from '../db/queries/tenants.js'
 import { getTrigger } from '../db/queries/triggers.js'
 import { getGroup } from '../db/queries/groups.js'
 import { qUsersByJids, qDataSince } from '../db/queries/group-tools.js'
@@ -58,14 +59,21 @@ function jobTrigger(job: BotJob): BotTrigger | null {
   return job.triggerId === null ? null : getTrigger(job.triggerId)
 }
 
-/** The job's trigger, its settings, and the groups of its tenant. A job
- *  without its trigger fails quietly: TriggerGoneError posts nothing. */
+/** The job's trigger, its settings, and the groups of its tenant. A job whose
+ *  trigger is gone, switched off, set to another Q&A group, or no longer in
+ *  the same tenant as the job's group fails quietly: TriggerGoneError posts nothing. */
 export function loadQaTrigger(job: BotJob): { trigger: BotTrigger; config: QaTriggerConfig; scope: QaScope } {
   const trigger = jobTrigger(job)
   if (!trigger) throw new TriggerGoneError(`The trigger of this job (${job.triggerId ?? 'none'}) no longer exists`)
+  if (!trigger.enabled) throw new TriggerGoneError('The trigger was switched off')
+  const config = qaTriggerType.normalize(trigger.config)
+  if (config.qaGroupJid !== job.groupJid) throw new TriggerGoneError("The trigger's Q&A group was changed")
+  if (getTenantIdForGroup(job.groupJid ?? '') !== trigger.tenantId) {
+    throw new TriggerGoneError("The group is no longer in this trigger's tenant")
+  }
   return {
     trigger,
-    config: qaTriggerType.normalize(trigger.config),
+    config,
     scope: resolveTenantScope(trigger.tenantId, job.groupJid ?? ''),
   }
 }
