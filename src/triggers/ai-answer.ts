@@ -12,9 +12,10 @@ export interface AnswerSpec<T extends AiAnswerBase> {
   validate(v: unknown): T | null
 }
 
-/** Whether the schema is sent on rounds that also offer tools. Stays false
- *  unless the live Gemini test proves the combination works. */
-export const SEND_ANSWER_SCHEMA_WITH_TOOLS = false
+/** Whether the schema is sent on rounds that also offer tools. Verified live on
+ *  2026-11-25: the configured Gemini model accepts tools together with a JSON
+ *  response schema (tests/ai/gemini-live.test.ts). */
+export const SEND_ANSWER_SCHEMA_WITH_TOOLS = true
 
 const ajv = new Ajv({ strict: false })
 
