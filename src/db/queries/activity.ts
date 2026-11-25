@@ -2,6 +2,7 @@ import { eq, and, desc, sql, gte, lt, inArray } from 'drizzle-orm'
 import { getAccountDb } from '../account.js'
 import { groupActivityLog } from '../schema.js'
 import type { ActivityRecord } from '../../whatsapp/activity/record.js'
+import { normalizeText } from '../../triggers/spam/report.js'
 
 /** Insert activity record. Returns true if inserted, false if duplicate. */
 export function insertActivity(record: ActivityRecord): boolean {
@@ -156,4 +157,51 @@ export function countUserMessagesBefore(groupJid: string, userJid: string, befor
     ))
     .get()
   return row?.cnt ?? 0
+}
+
+/** Whether a `delete` row exists for this message. */
+export function isMessageDeleted(groupJid: string, messageId: string): boolean {
+  return !!getAccountDb().select({ id: groupActivityLog.id }).from(groupActivityLog)
+    .where(and(
+      eq(groupActivityLog.groupJid, groupJid),
+      eq(groupActivityLog.eventType, 'delete'),
+      eq(groupActivityLog.parentId, messageId),
+    )).limit(1).get()
+}
+
+/** The user's undeleted messages in these groups whose latest text (the last edit, if any) normalizes to textKey. */
+export function findUserCopies(groupJids: string[], userJid: string, textKey: string): { groupJid: string; messageId: string; timestamp: number }[] {
+  if (groupJids.length === 0) return []
+  const db = getAccountDb()
+  const messages = db.select().from(groupActivityLog)
+    .where(and(
+      inArray(groupActivityLog.groupJid, groupJids),
+      eq(groupActivityLog.userJid, userJid),
+      eq(groupActivityLog.eventType, 'message'),
+    )).all()
+  if (messages.length === 0) return []
+  const related = db.select().from(groupActivityLog)
+    .where(and(
+      inArray(groupActivityLog.groupJid, groupJids),
+      inArray(groupActivityLog.eventType, ['edit', 'delete']),
+      inArray(groupActivityLog.parentId, messages.map(m => m.messageId)),
+    ))
+    .orderBy(groupActivityLog.timestamp, groupActivityLog.id).all()
+  const key = (g: string, id: string) => `${g}\u0000${id}`
+  const deleted = new Set<string>()
+  const latest = new Map<string, string | undefined>()
+  for (const r of related) {
+    const k = key(r.groupJid, r.parentId!)
+    if (r.eventType === 'delete') deleted.add(k)
+    else latest.set(k, r.metadata?.text as string | undefined)
+  }
+  const out: { groupJid: string; messageId: string; timestamp: number }[] = []
+  for (const m of messages) {
+    const k = key(m.groupJid, m.messageId)
+    if (deleted.has(k)) continue
+    const text = latest.has(k) ? latest.get(k) : (m.metadata?.text as string | undefined)
+    if (typeof text !== 'string' || normalizeText(text) !== textKey) continue
+    out.push({ groupJid: m.groupJid, messageId: m.messageId, timestamp: m.timestamp })
+  }
+  return out
 }

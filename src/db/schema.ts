@@ -123,6 +123,27 @@ export const botJobs = sqliteTable('bot_jobs', {
 
 export type BotJob = typeof botJobs.$inferSelect
 
+export interface SpamVerdict { isspam?: boolean; isspammer?: boolean; reason?: string }
+/** Group jids of the copies seen so far, and what happened when removing the user. */
+export interface SpamCaseState { notDeleted: string[]; deleted: string[]; removal?: string }
+
+/** One verdict per (trigger, user, normalized text); also remembers the report message to edit. */
+export const spamCases = sqliteTable('spam_cases', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  triggerId: integer('trigger_id').notNull(),
+  userJid: text('user_jid').notNull(),
+  textKey: text('text_key').notNull(),
+  verdict: text('verdict', { mode: 'json' }).$type<SpamVerdict>().notNull(),
+  reportGroupJid: text('report_group_jid'),
+  reportMessageId: text('report_message_id'),
+  reportPostedAt: integer('report_posted_at'),
+  state: text('state', { mode: 'json' }).$type<SpamCaseState>(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export type SpamCase = typeof spamCases.$inferSelect
+
 export const botJobEvents = sqliteTable('bot_job_events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   jobId: integer('job_id').notNull().references(() => botJobs.id),

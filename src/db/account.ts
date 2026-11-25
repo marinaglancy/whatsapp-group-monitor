@@ -127,6 +127,22 @@ export function ensureAccountSchema(sqlite: Database.Database, opts: { legacyQaP
 
     CREATE INDEX IF NOT EXISTS idx_bot_job_events_job ON bot_job_events(job_id);
     CREATE INDEX IF NOT EXISTS idx_bot_job_events_message ON bot_job_events(message_id);
+
+    CREATE TABLE IF NOT EXISTS spam_cases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trigger_id INTEGER NOT NULL,
+      user_jid TEXT NOT NULL,
+      text_key TEXT NOT NULL,
+      verdict TEXT NOT NULL,
+      report_group_jid TEXT,
+      report_message_id TEXT,
+      report_posted_at INTEGER,
+      state TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_spam_cases_lookup ON spam_cases(trigger_id, user_jid, text_key, created_at);
   `)
 
   // Migrations: drop columns that are no longer needed
