@@ -5,6 +5,8 @@ import { mkdirSync, copyFileSync, unlinkSync } from 'fs'
 import { config } from '../config.js'
 import { logger } from '../utils/logger.js'
 import * as schema from './schema.js'
+import { getSetting } from './queries/settings.js'
+import { migrateLegacyQaGroups } from '../tenants/import.js'
 import { ftsTextSqlExpr, FTS_EVENT_TYPES, FTS_GENERATION } from './fts-expr.js'
 
 let db: ReturnType<typeof drizzle<typeof schema>> | null = null
@@ -28,9 +30,9 @@ export function checkpointAccountDb() {
   accountSqlite?.pragma('wal_checkpoint(FULL)')
 }
 
-/** Creates/migrates every account.db table. `opts` is unused until the legacy Q&A prompt migration. */
+/** Creates/migrates every account.db table. The first time the tenants table is created, existing Q&A groups become tenants. */
 export function ensureAccountSchema(sqlite: Database.Database, opts: { legacyQaPrompt: string | null }): void {
-  void opts
+  const hadTenants = !!sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='tenants'").get()
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS groups (
       jid TEXT PRIMARY KEY,
@@ -232,6 +234,11 @@ export function ensureAccountSchema(sqlite: Database.Database, opts: { legacyQaP
       INSERT INTO messages_fts(rowid, text) VALUES (new.id, ${ftsTextSqlExpr('new.')});
     END;
   `)
+
+  if (!hadTenants) {
+    const { created, skippedJids } = migrateLegacyQaGroups(sqlite, opts.legacyQaPrompt)
+    if (created > 0 || skippedJids.length > 0) logger.info({ created, skipped: skippedJids.length }, 'Converted Q&A groups into tenants')
+  }
 }
 
 export function initAccountDb(phone: string) {
@@ -252,7 +259,7 @@ export function initAccountDb(phone: string) {
 
   db = drizzle(sqlite, { schema })
 
-  ensureAccountSchema(sqlite, { legacyQaPrompt: null })
+  ensureAccountSchema(sqlite, { legacyQaPrompt: getSetting('ai_system_prompt') })
 
   currentPhone = phone
   logger.info({ phone, path: dbPath }, 'Account database initialized')
