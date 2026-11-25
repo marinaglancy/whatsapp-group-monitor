@@ -105,7 +105,7 @@ describe('tenants api', () => {
     const body = res.json()
     expect(body.tenant).toMatchObject({ id: t, name: 'Alpha' })
     expect(body.entries).toEqual([{ jid: 'c@g.us', name: 'Comm', isCommunity: true, groupCount: 2 }])
-    expect(body.coveredGroups).toEqual([{ jid: 'k1@g.us', name: 'Kid1' }])
+    expect(body.coveredGroups).toEqual([{ jid: 'k1@g.us', name: 'Kid1', botMembership: 'participant' }])
     expect(body.warnings).toEqual(['Kid2 is in tenant Beta directly, so it is not part of this tenant'])
     expect(body.triggers).toEqual([{
       id: trig, name: 'Questions', type: 'qa', typeName: 'Questions', enabled: true,
@@ -173,7 +173,7 @@ describe('tenants api', () => {
     expect(got.trigger).toMatchObject({ id, tenantId: t, type: 'qa', name: 'Mine', enabled: false })
     expect(got.trigger.config.waitSeconds).toBe(3)
     expect(got.tenant).toEqual({ id: t, name: 'One' })
-    expect(got.coveredGroups).toEqual([{ jid: 'a@g.us', name: 'A' }])
+    expect(got.coveredGroups).toEqual([{ jid: 'a@g.us', name: 'A', botMembership: 'participant' }])
     expect(got.type).toMatchObject({
       id: 'qa', displayName: 'Questions', defaultPrompt: DEFAULT_QA_SYSTEM_PROMPT,
       defaultErrorTemplate: QA_DEFAULT_ERROR_TEMPLATE,
@@ -193,6 +193,23 @@ describe('tenants api', () => {
     expect(getTrigger(id)).toBeNull()
     expect((await call('GET', `/api/triggers/${id}`)).statusCode).toBe(404)
     expect((await call('DELETE', `/api/triggers/${id}`)).statusCode).toBe(404)
+  })
+
+  it('lists covered groups by name with the bot membership, and names a Q&A group outside the tenant', async () => {
+    seedGroup('z@g.us', 'Zulu')
+    seedGroup('a@g.us', 'Alpha', { botMembership: 'none' })
+    seedGroup('out@g.us', 'Out')
+    const t = seedTenant('One', ['z@g.us', 'a@g.us'])
+    const id = seedQaTrigger(t, 'out@g.us')
+    const sorted = [
+      { jid: 'a@g.us', name: 'Alpha', botMembership: 'none' },
+      { jid: 'z@g.us', name: 'Zulu', botMembership: 'participant' },
+    ]
+    const got = (await call('GET', `/api/triggers/${id}`)).json()
+    expect(got.coveredGroups).toEqual(sorted)
+    expect(got.groupNames).toEqual({ 'out@g.us': 'Out' })
+    expect((await call('GET', `/api/tenants/${t}`)).json().coveredGroups).toEqual(sorted)
+    expect((await call('GET', `/api/trigger-types/qa?tenant=${t}`)).json().coveredGroups).toEqual(sorted)
   })
 
   it('returns 400 with the validate message, and for a bad name or type', async () => {
@@ -235,7 +252,7 @@ describe('tenants api', () => {
     const res = await call('GET', `/api/trigger-types/qa?tenant=${t}`)
     expect(res.statusCode).toBe(200)
     expect(res.json().type.id).toBe('qa')
-    expect(res.json().coveredGroups).toEqual([{ jid: 'a@g.us', name: 'A' }])
+    expect(res.json().coveredGroups).toEqual([{ jid: 'a@g.us', name: 'A', botMembership: 'participant' }])
     expect((await call('GET', `/api/trigger-types/zzz?tenant=${t}`)).statusCode).toBe(404)
     expect((await call('GET', '/api/trigger-types/qa?tenant=9999')).statusCode).toBe(404)
   })

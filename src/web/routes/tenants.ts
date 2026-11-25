@@ -61,8 +61,13 @@ export function registerTenantRoutes(app: FastifyInstance) {
   registerBuiltinTriggerTypes()
 
   const nameMap = () => new Map(getAllGroups().map(g => [g.jid, g.name]))
-  const namedGroups = (jids: string[], names: Map<string, string>) =>
-    jids.map(jid => ({ jid, name: names.get(jid) ?? jid }))
+  /** The tenant's groups for the Q&A group select: sorted by name, with the bot's membership. */
+  const coveredGroupRows = (jids: string[]) => {
+    const byJid = new Map(getAllGroups().map(g => [g.jid, g]))
+    return jids
+      .map(jid => ({ jid, name: byJid.get(jid)?.name ?? jid, botMembership: byJid.get(jid)?.botMembership ?? 'none' }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
 
   function entryRows(tenantId: number, names: Map<string, string>) {
     const { groups } = loadMembershipSnapshot()
@@ -153,7 +158,7 @@ export function registerTenantRoutes(app: FastifyInstance) {
     return reply.send({
       tenant,
       entries: entryRows(tenant.id, names),
-      coveredGroups: namedGroups(covered, names),
+      coveredGroups: coveredGroupRows(covered),
       warnings,
       triggers,
       triggerTypes: listTriggerTypes().map(t => ({ id: t.id, displayName: t.displayName })),
@@ -254,13 +259,18 @@ export function registerTenantRoutes(app: FastifyInstance) {
     const tenant = trigger ? getTenant(trigger.tenantId) : null
     const type = trigger ? getTriggerType(trigger.type) : null
     if (!trigger || !tenant || !type) return reply.status(404).send({ error: 'Trigger not found' })
+    const config = type.normalize(trigger.config)
+    const names = nameMap()
+    // Names of the groups the settings point to, also of one that is no longer in the tenant
+    const settingsGroups = Object.values(config).filter((v): v is string => typeof v === 'string' && names.has(v))
     return reply.send({
       trigger: {
         id: trigger.id, tenantId: trigger.tenantId, type: trigger.type, name: trigger.name,
-        enabled: trigger.enabled, config: type.normalize(trigger.config),
+        enabled: trigger.enabled, config,
       },
       tenant: { id: tenant.id, name: tenant.name },
-      coveredGroups: namedGroups(getTenantCoveredGroupJids(tenant.id), nameMap()),
+      coveredGroups: coveredGroupRows(getTenantCoveredGroupJids(tenant.id)),
+      groupNames: Object.fromEntries(settingsGroups.map(jid => [jid, names.get(jid)])),
       type: typeInfo(type),
     })
   })
@@ -273,7 +283,7 @@ export function registerTenantRoutes(app: FastifyInstance) {
     if (tenantId === null || !getTenant(tenantId)) return reply.status(404).send({ error: 'Tenant not found' })
     return reply.send({
       type: typeInfo(type),
-      coveredGroups: namedGroups(getTenantCoveredGroupJids(tenantId), nameMap()),
+      coveredGroups: coveredGroupRows(getTenantCoveredGroupJids(tenantId)),
     })
   })
 

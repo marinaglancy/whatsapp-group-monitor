@@ -65,10 +65,17 @@
       }
     }
 
-    function backUrl() { return '/tenants/' + tenantId; }
+    // An existing trigger goes back to its own tenant, whatever the URL says
+    function backUrl() { return '/tenants/' + (data && data.trigger ? data.trigger.tenantId : tenantId); }
 
-    function qaForm(cfg, type, groups) {
-      const options = groups.map(g => '<option value="' + esc(g.jid) + '"' + (g.jid === cfg.qaGroupJid ? ' selected' : '') + '>' + esc(g.name) + '</option>').join('');
+    function qaForm(cfg, type, groups, groupNames) {
+      let options = groups.map(g => '<option value="' + esc(g.jid) + '"' + (g.jid === cfg.qaGroupJid ? ' selected' : '') + '>'
+        + esc(g.name) + (g.botMembership === 'none' ? ' (bot left this group)' : '') + '</option>').join('');
+      // The saved Q&A group is no longer in the tenant: show it, so the admin sees what changed
+      if (cfg.qaGroupJid && !groups.some(g => g.jid === cfg.qaGroupJid)) {
+        options = '<option value="' + esc(cfg.qaGroupJid) + '" selected disabled>'
+          + esc(groupNames[cfg.qaGroupJid] || cfg.qaGroupJid) + ' (not in this tenant)</option>' + options;
+      }
       return '<p class="muted" style="margin:.3rem 0">Event: a message in the Q&amp;A group that @mentions the bot or replies to one of its messages</p>'
         + '<div class="row" style="margin-bottom:1rem;font-size:.85rem"><label><input type="checkbox" id="f-only-first"' + (cfg.onlyIfFirst ? ' checked' : '') + '> Only if no earlier trigger fired for this event</label></div>'
         + '<div class="field"><label for="f-name">Name</label><input type="text" id="f-name" style="width:260px" maxlength="100"></div>'
@@ -120,7 +127,7 @@
         + '<form class="card" id="trigger-form" onsubmit="save(event)">'
         + '<div class="row" style="justify-content:space-between;margin-bottom:.4rem"><h4>' + esc(name) + ' <span class="badge">' + esc(type.displayName) + '</span></h4>'
         + '<label class="row" style="font-size:.85rem"><input type="checkbox" id="f-enabled"' + (enabled ? ' checked' : '') + '> Enabled</label></div>'
-        + form.draw(cfg, type, data.coveredGroups)
+        + form.draw(cfg, type, data.coveredGroups, data.groupNames || {})
         + '<div class="error" id="form-error"></div>'
         + '<div class="row" style="justify-content:space-between">'
         + (trig ? '<button type="button" class="btn btn-red" onclick="removeTrigger()">Delete trigger</button>' : '<span></span>')
