@@ -1,0 +1,56 @@
+import { Ajv } from 'ajv'
+
+/** Every AI trigger answers with JSON of this base shape plus its own fields. */
+export interface AiAnswerBase { error: boolean; errormessage?: string }
+
+export interface AnswerSpec<T extends AiAnswerBase> {
+  /** JSON schema sent to the provider (JSON mode). */
+  modelSchema: Record<string, unknown>
+  /** Prompt text telling the AI the answer format. */
+  formatSection: string
+  /** The parsed value as T, or null when it does not fit. */
+  validate(v: unknown): T | null
+}
+
+/** Whether the schema is sent on rounds that also offer tools. Stays false
+ *  unless the live Gemini test proves the combination works. */
+export const SEND_ANSWER_SCHEMA_WITH_TOOLS = false
+
+const ajv = new Ajv({ strict: false })
+
+export function buildAnswerSpec<T extends AiAnswerBase>(
+  okProps: Record<string, Record<string, unknown>>,
+  formatSection: string,
+): AnswerSpec<T> {
+  const modelSchema = {
+    type: 'object',
+    properties: { error: { type: 'boolean' }, errormessage: { type: 'string' }, ...okProps },
+    required: ['error'],
+  }
+  // When error is false, every extra field is required.
+  const checkSchema = {
+    ...modelSchema,
+    if: { properties: { error: { const: false } } },
+    then: { required: Object.keys(okProps) },
+  }
+  const check = ajv.compile(checkSchema)
+  return {
+    modelSchema,
+    formatSection,
+    validate: v => (check(v) ? (v as unknown as T) : null),
+  }
+}
+
+/** Parse the AI's text as the spec's JSON answer; null when it is not one.
+ *  One surrounding ```json fence is accepted. */
+export function parseAiAnswer<T extends AiAnswerBase>(text: string | undefined, spec: AnswerSpec<T>): T | null {
+  if (!text) return null
+  let body = text.trim()
+  const fence = /^```(?:json)?\s*\n?([\s\S]*?)\n?\s*```$/i.exec(body)
+  if (fence) body = fence[1].trim()
+  try {
+    return spec.validate(JSON.parse(body))
+  } catch {
+    return null
+  }
+}

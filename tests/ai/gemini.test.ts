@@ -81,6 +81,16 @@ describe('toGeminiConfig', () => {
     const c = toGeminiConfig({ system: 'SYS', messages: [], tools: [] })
     expect(c).toEqual({ systemInstruction: 'SYS' })
   })
+  it('sends the response schema as JSON mode to Gemini', () => {
+    expect(toGeminiConfig({ system: 's', messages: [], tools: [], responseSchema: { type: 'object' } }))
+      .toMatchObject({ responseMimeType: 'application/json', responseJsonSchema: { type: 'object' } })
+  })
+
+  it('leaves JSON mode off without a response schema', () => {
+    const c = toGeminiConfig({ system: 's', messages: [], tools: [] })
+    expect(c).not.toHaveProperty('responseMimeType')
+    expect(c).not.toHaveProperty('responseJsonSchema')
+  })
 })
 
 describe('fromGeminiResponse', () => {

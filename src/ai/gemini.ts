@@ -64,11 +64,17 @@ export function toGeminiTools(tools: AiToolDef[]): GeminiTool[] | undefined {
 export interface GeminiConfig {
   systemInstruction: string
   tools?: GeminiTool[]
+  responseMimeType?: string
+  responseJsonSchema?: Record<string, unknown>
 }
 
 export function toGeminiConfig(req: AiRequest): GeminiConfig {
   const tools = toGeminiTools(req.tools)
-  return { systemInstruction: req.system, ...(tools ? { tools } : {}) }
+  return {
+    systemInstruction: req.system,
+    ...(tools ? { tools } : {}),
+    ...(req.responseSchema ? { responseMimeType: 'application/json', responseJsonSchema: req.responseSchema } : {}),
+  }
 }
 
 export function fromGeminiResponse(resp: GeminiResponseShape): AiResponse {

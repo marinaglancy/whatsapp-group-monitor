@@ -3,6 +3,7 @@ import { AI_CALL_TIMEOUT_MS, type AiChatMessage, type AiProvider, type AiToolCal
 import { getAiSettings, expandPlaceholders, type AiSettings } from '../ai/settings.js'
 import { loadToolDeclarations } from '../ai/tools/loader.js'
 import { executeQaTool } from '../ai/tools/executors.js'
+import { AI_BUSY_RE } from '../triggers/errors.js'
 import { resolveQaScope, type QaScope } from './scope.js'
 import { getBotUser } from '../whatsapp/handlers/connection.js'
 import { getCreationRecord } from '../db/queries/activity.js'
@@ -191,10 +192,6 @@ export function buildFinalRoundMessages(messages: AiChatMessage[], historyTurns:
   return [...messages.slice(0, historyTurns), { role: 'user', text: parts.join('\n\n') }]
 }
 
-/** The AI service says it is overloaded or out of quota. The SDK's error
- *  message is the JSON error body, so a 429 shows as "code":429 — a bare
- *  number would also match e.g. a daily limit of 429. */
-const AI_BUSY_RE = /"code":\s*429\b|too many requests|quota|rate.?limit|resource.?exhausted|overloaded|unavailable/i
 /** The request never got a proper answer: network failure, timeout, or the
  *  WhatsApp connection dropped (Baileys errors) while sending the reply. */
 const NETWORK_RE = /fetch failed|network|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|timed out|timeout|abort|Connection (Closed|Terminated|was lost)/i

@@ -3,6 +3,8 @@ import { createGeminiProvider } from '../../src/ai/gemini.js'
 import type { AiChatMessage } from '../../src/ai/provider.js'
 import { buildFinalRoundMessages } from '../../src/bot/responder.js'
 import { DEFAULT_GEMINI_MODEL } from '../../src/ai/settings.js'
+import { parseAiAnswer } from '../../src/triggers/ai-answer.js'
+import { QA_ANSWER_SPEC } from '../../src/triggers/qa/answer.js'
 
 const KEY = process.env.GEMINI_TEST_KEY
 
@@ -37,4 +39,18 @@ describe.skipIf(!KEY)('gemini live', () => {
     expect(last.toolCalls).toBeUndefined()
     expect(last.text).toMatch(/14[:.]05|2:05/)
   }, 60_000)
+
+  // Decides SEND_ANSWER_SCHEMA_WITH_TOOLS: does JSON mode work together with tools?
+  it('accepts tools together with a response schema', async () => {
+    const provider = createGeminiProvider({ apiKey: KEY!, model: DEFAULT_GEMINI_MODEL })
+    const tools = [{ name: 'get_time', description: 'Current time.', parameters: { type: 'object', properties: {} } }]
+    const resp = await provider.generate({
+      system: `Call get_time before answering a question about time.\n${QA_ANSWER_SPEC.formatSection}`,
+      messages: [{ role: 'user', text: 'What time is it?' }],
+      tools,
+      responseSchema: QA_ANSWER_SPEC.modelSchema,
+    })
+    if (resp.toolCalls?.length) expect(resp.toolCalls[0].name).toBe('get_time')
+    else expect(parseAiAnswer(resp.text, QA_ANSWER_SPEC)).not.toBeNull()
+  }, 30_000)
 })

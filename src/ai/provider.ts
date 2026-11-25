@@ -40,6 +40,8 @@ export interface AiRequest {
   system: string
   messages: AiChatMessage[]
   tools: AiToolDef[]
+  /** JSON schema the answer text must follow (provider JSON mode). */
+  responseSchema?: Record<string, unknown>
 }
 
 export interface AiProvider {

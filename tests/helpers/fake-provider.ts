@@ -4,6 +4,7 @@ export interface FakeCall {
   system: string
   messages: AiChatMessage[]
   tools: AiToolDef[]
+  responseSchema?: Record<string, unknown>
 }
 
 /** Scripted provider: each generate() shifts the next scripted response.
@@ -13,7 +14,7 @@ export function fakeProvider(script: Array<Partial<AiResponse>>) {
   const provider = {
     calls,
     async generate(req: AiRequest) {
-      calls.push({ system: req.system, messages: [...req.messages], tools: req.tools })
+      calls.push({ system: req.system, messages: [...req.messages], tools: req.tools, responseSchema: req.responseSchema })
       const next = script.shift()
       if (!next) throw new Error('fakeProvider script exhausted')
       return { usage: { tokensIn: 10, tokensOut: 5 }, ...next } as AiResponse
