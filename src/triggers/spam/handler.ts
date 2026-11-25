@@ -4,7 +4,6 @@ import { expandPlaceholders, getAiSettings, type AiSettings } from '../../ai/set
 import { buildScopeListing, checkDailyLimit, runAiAnswer } from '../ai-runner.js'
 import { ERROR_TEXT, TriggerGoneError, TriggerJobError } from '../errors.js'
 import type { ErrorTarget } from '../error-notifier.js'
-import type { TriggerEvent } from '../types.js'
 import { spamTriggerType, type SpamTriggerConfig } from './type.js'
 import { SPAM_EDIT_WINDOW_MS, SPAM_REUSE_WINDOW_MS } from './defaults.js'
 import { SPAM_ANSWER_SPEC } from './answer.js'
@@ -89,8 +88,9 @@ function checkReportGroup(tenantId: number, reportGroupJid: string): void {
 
 /** The job's trigger, its settings, and the groups of its tenant (the
  *  message's group first). A job whose trigger is gone or switched off, whose
- *  group left the trigger's tenant, or whose group the trigger no longer
- *  watches fails quietly: TriggerGoneError posts nothing. */
+ *  group left the trigger's tenant, or whose group the groups setting no
+ *  longer picks fails quietly: TriggerGoneError posts nothing. The bot's role
+ *  is not checked again: conditions are checked once, when the message arrives. */
 export function loadSpamTrigger(job: BotJob): { trigger: BotTrigger; config: SpamTriggerConfig; scope: QaScope } {
   const trigger = job.triggerId === null ? null : getTrigger(job.triggerId)
   if (!trigger) throw new TriggerGoneError(`The trigger of this job (${job.triggerId ?? 'none'}) no longer exists`)
@@ -100,19 +100,8 @@ export function loadSpamTrigger(job: BotJob): { trigger: BotTrigger; config: Spa
     throw new TriggerGoneError("The group is no longer in this trigger's tenant")
   }
   const config = spamTriggerType.normalize(trigger.config)
-  if (!spamTriggerType.watches(eventOf(job), config)) throw new TriggerGoneError('The trigger no longer watches this group')
+  if (!spamTriggerType.selectsGroup(groupJid, config)) throw new TriggerGoneError('The trigger no longer watches this group')
   return { trigger, config, scope: resolveTenantScope(trigger.tenantId, groupJid) }
-}
-
-/** The job's message as an event for watches(), which looks at its group. */
-function eventOf(job: BotJob): TriggerEvent {
-  return {
-    kind: 'group_message',
-    record: {
-      groupJid: job.groupJid ?? '', userJid: job.userJid ?? '', messageId: job.messageId ?? '',
-      parentId: null, eventType: 'message', metadata: null, timestamp: 0,
-    },
-  }
 }
 
 /** The spam_check handler (phase 1: reports only). One job per message; the

@@ -7,6 +7,7 @@ import { setSetting } from '../../src/db/queries/settings.js'
 import { updateDisplayName } from '../../src/db/queries/users.js'
 import { formatDateTime } from '../../src/utils/time.js'
 import { setTenantGroups } from '../../src/db/queries/tenants.js'
+import { updateBotMembership } from '../../src/db/queries/groups.js'
 import { resolveMentionTokens } from '../../src/whatsapp/actions.js'
 import { setTriggerEnabled, updateTrigger } from '../../src/db/queries/triggers.js'
 import { insertJob, getJob, getJobEvents, addJobEvent, addJobAiUsage } from '../../src/db/queries/jobs.js'
@@ -501,6 +502,20 @@ describe('spam_check handler: stops', () => {
 
     expect(provider.calls.length).toBe(0)
     expect(posts).toEqual([])
+  })
+
+  it('still runs when the bot\'s role changed during the wait: the role is checked when the message arrives', async () => {
+    const provider = fakeProvider([verdict(true, true), verdict(true, true)])
+    const handle = makeHandler(provider)
+
+    updateBotMembership('a@g.us', 'participant') // the bot lost its admin role
+    setConfig({ botRole: 'admin' })
+    await expect(handle(copyJob('a@g.us'))).resolves.toMatchObject({ report: 'posted' })
+
+    updateBotMembership('b@g.us', 'admin') // the bot became an admin
+    setConfig({ botRole: 'not_admin' })
+    await expect(handle(copyJob('b@g.us', 'Another ad https://x.y/other'))).resolves.toMatchObject({ report: 'posted' })
+    expect(provider.calls.length).toBe(2)
   })
 
   it('loadSpamTrigger returns the settings and the tenant\'s groups with the message\'s group first', () => {
