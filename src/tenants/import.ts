@@ -8,14 +8,41 @@ export interface LegacyQaGroup { jid: string; name: string; botFunctions: number
 export interface IncomingTrigger { type: string; name: string; enabled: boolean; sortOrder: number; config: Record<string, unknown> }
 export interface IncomingTenant { name: string; jids: string[]; triggers: IncomingTrigger[] }
 
+type LegacyQa = { linkedJids: string[]; instructions: string }
+
+/** The group's old Q&A settings, with anything malformed left out (and logged). null = no usable qa entry. */
+function readLegacyQa(g: LegacyQaGroup): LegacyQa | null {
+  const qa: unknown = g.botConfig?.qa
+  if (qa === undefined || qa === null) return null
+  if (typeof qa !== 'object' || Array.isArray(qa)) {
+    logger.warn({ jid: g.jid }, 'Ignoring malformed Q&A settings of an old Q&A group')
+    return null
+  }
+  const { linkedJids, instructions } = qa as { linkedJids?: unknown; instructions?: unknown }
+  let linked: string[] = []
+  if (linkedJids !== undefined) {
+    if (Array.isArray(linkedJids)) {
+      linked = linkedJids.filter((j): j is string => typeof j === 'string' && j !== '')
+    }
+    if (!Array.isArray(linkedJids) || linked.length !== linkedJids.length) {
+      logger.warn({ jid: g.jid }, 'Ignoring malformed linked groups of an old Q&A group')
+    }
+  }
+  if (instructions !== undefined && typeof instructions !== 'string') {
+    logger.warn({ jid: g.jid }, 'Ignoring malformed instructions of an old Q&A group')
+  }
+  return { linkedJids: linked, instructions: typeof instructions === 'string' ? instructions : '' }
+}
+
 /** One tenant per legacy Q&A group (Q&A bit on, or a bot_config.qa entry), oldest group first. */
 export function convertLegacyQaGroups(groups: LegacyQaGroup[], legacyPrompt: string | null): IncomingTenant[] {
   return groups
-    .filter(g => (g.botFunctions & BOT_FUNCTION_QA) !== 0 || !!g.botConfig?.qa)
-    .sort((a, b) => a.createdAt - b.createdAt || (a.jid < b.jid ? -1 : a.jid > b.jid ? 1 : 0))
-    .map(g => ({
+    .map(g => ({ g, qa: readLegacyQa(g) }))
+    .filter(({ g, qa }) => (g.botFunctions & BOT_FUNCTION_QA) !== 0 || qa !== null)
+    .sort((x, y) => x.g.createdAt - y.g.createdAt || (x.g.jid < y.g.jid ? -1 : x.g.jid > y.g.jid ? 1 : 0))
+    .map(({ g, qa }) => ({
       name: g.name,
-      jids: [...new Set([g.jid, ...(g.botConfig?.qa?.linkedJids ?? [])])],
+      jids: [...new Set([g.jid, ...(qa?.linkedJids ?? [])])],
       triggers: [{
         type: 'qa',
         name: 'Q&A',
@@ -24,7 +51,7 @@ export function convertLegacyQaGroups(groups: LegacyQaGroup[], legacyPrompt: str
         config: {
           ...QA_TRIGGER_DEFAULTS,
           qaGroupJid: g.jid,
-          instructions: g.botConfig?.qa?.instructions ?? '',
+          instructions: qa?.instructions ?? '',
           prompt: legacyPrompt?.trim() ? legacyPrompt : '',
         },
       }],
@@ -61,9 +88,15 @@ export function insertIncomingTenant(sqlite: Database.Database, t: IncomingTenan
   })()
 }
 
-function parseBotConfig(raw: string | null): GroupBotConfig | null {
+function parseBotConfig(raw: string | null, jid: string): GroupBotConfig | null {
   if (!raw) return null
-  try { return JSON.parse(raw) as GroupBotConfig } catch { return null }
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { parsed = undefined }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    logger.warn({ jid }, 'Ignoring unreadable bot_config of a group')
+    return null
+  }
+  return parsed as GroupBotConfig
 }
 
 /** One-off conversion of the old Q&A group settings. Group jids already taken by an earlier tenant are skipped. */
@@ -71,7 +104,7 @@ export function migrateLegacyQaGroups(sqlite: Database.Database, legacyPrompt: s
   const rows = sqlite.prepare('SELECT jid, name, bot_functions, bot_config, created_at FROM groups')
     .all() as { jid: string; name: string; bot_functions: number; bot_config: string | null; created_at: number }[]
   const legacy = convertLegacyQaGroups(rows.map(r => ({
-    jid: r.jid, name: r.name, botFunctions: r.bot_functions, botConfig: parseBotConfig(r.bot_config), createdAt: r.created_at,
+    jid: r.jid, name: r.name, botFunctions: r.bot_functions, botConfig: parseBotConfig(r.bot_config, r.jid), createdAt: r.created_at,
   })), legacyPrompt)
 
   const { entries, groups } = readMembershipSnapshot(sqlite)

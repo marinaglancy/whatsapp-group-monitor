@@ -108,13 +108,35 @@ describe('converting legacy Q&A groups', () => {
     expect(listTriggers(b.id)[0].config).toMatchObject({ qaGroupJid: 'b@g.us', instructions: 'Keep me' })
   })
 
-  it('rolls back the tenant tables when the conversion fails, and retries on the next open', () => {
-    makeLegacyDb([{ jid: 'qa@g.us', name: 'Q', fn: 1, cfg: { qa: { linkedJids: [{}] } } }])
-    expect(() => initAccountDb(PHONE)).toThrow()
+  it('tolerates malformed old settings instead of failing', () => {
+    makeLegacyDb([
+      { jid: 'a@g.us', name: 'A', fn: 1, at: 1, cfg: { qa: { linkedJids: [{}, 'ok@g.us', ''], instructions: 42 } } },
+      { jid: 'b@g.us', name: 'B', fn: 1, at: 2, cfg: { qa: { linkedJids: 'nope' } } },
+      { jid: 'c@g.us', name: 'C', fn: 1, at: 3, cfg: 5 },
+      { jid: 'd@g.us', name: 'D', fn: 1, at: 4, cfg: [] },
+    ])
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    expect(() => initAccountDb(PHONE)).not.toThrow()
+    const byName = Object.fromEntries(listTenants().map(t => [t.name, t]))
+    expect(Object.keys(byName).sort()).toEqual(['A', 'B', 'C', 'D'])
+    expect(getTenantEntries(byName.A.id).sort()).toEqual(['a@g.us', 'ok@g.us'])
+    expect(listTriggers(byName.A.id)[0].config).toMatchObject({ instructions: '' })
+    expect(getTenantEntries(byName.B.id)).toEqual(['b@g.us'])
+    expect(warn).toHaveBeenCalledWith(expect.objectContaining({ jid: 'a@g.us' }), expect.any(String))
+    expect(warn).toHaveBeenCalledWith({ jid: 'c@g.us' }, expect.any(String))
+  })
+
+  it('rolls back the tenant tables when the conversion really fails, and retries on the next open', () => {
+    makeLegacyDb([{ jid: 'qa@g.us', name: 'Q', fn: 1 }])
+    // a leftover table of the wrong shape makes the trigger insert fail
     const raw = new Database(join(dir, PHONE, 'account.db'))
-    expect(raw.prepare("SELECT name FROM sqlite_master WHERE name='tenants'").get()).toBeUndefined()
-    raw.prepare('UPDATE groups SET bot_config = ?').run(JSON.stringify({ qa: { linkedJids: [] } }))
+    raw.exec('CREATE TABLE bot_triggers (id INTEGER PRIMARY KEY)')
     raw.close()
+    expect(() => initAccountDb(PHONE)).toThrow()
+    const check = new Database(join(dir, PHONE, 'account.db'))
+    expect(check.prepare("SELECT name FROM sqlite_master WHERE name='tenants'").get()).toBeUndefined()
+    check.exec('DROP TABLE bot_triggers')
+    check.close()
     initAccountDb(PHONE)
     expect(listTenants().map(t => t.name)).toEqual(['Q'])
   })
