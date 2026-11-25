@@ -98,8 +98,10 @@ On the trigger page you can also set:
 
 If you used an earlier version with Q&A groups, they are converted to tenants
 automatically on the first start of this version: one tenant per Q&A group, holding that
-group and its linked groups, with one Questions trigger carrying the old instructions
-(and the old main prompt, if you had changed it).
+group and its linked groups, with one Questions trigger named "Q&A" carrying the old
+instructions (and the old main prompt, if you had changed it). The trigger stays switched
+off if Q&A was off for that group. A group already taken by an earlier tenant is left out
+of the later one (a warning is logged).
 
 Every question becomes a **job**; see the **Bot jobs** page (linked from the status
 bar) for status, the full AI interaction trail, token usage and the trigger that created
@@ -118,8 +120,8 @@ to call, reads their results, and writes the final answer (up to 8 rounds within
 60 s budget). The last round sends no tools, only the results gathered so far, so the
 model has to answer. The model must reply with a JSON answer: either
 `{"error": false, "output": "..."}` with the text to post, or
-`{"error": true, "errormessage": "..."}` when it cannot answer. If the answer is not valid
-JSON, the job fails.
+`{"error": true, "errormessage": "..."}` when it cannot answer. If the AI still has no
+valid answer on the last round, the job fails and the error message is posted.
 When a job fails for good (for example the AI is busy, the daily limit is reached, no API
 key is set, or the AI reports an error), the trigger's **error message** is posted as a
 reply, with `{{error}}` replaced by a short plain reason. Temporary errors are retried
