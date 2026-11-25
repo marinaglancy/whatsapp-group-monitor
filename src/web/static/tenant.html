@@ -83,14 +83,17 @@
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    // Sends Content-Type only with a body: the server refuses an empty JSON body
     async function api(method, url, body) {
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      });
-      const json = await res.json().catch(() => ({}));
-      return { ok: res.ok, status: res.status, json };
+      try {
+        const headers = { 'x-csrf-token': csrf };
+        if (body !== undefined) headers['Content-Type'] = 'application/json';
+        const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+        const json = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, json };
+      } catch (err) {
+        return { ok: false, status: 0, json: { error: 'Could not reach the server: ' + err.message } };
+      }
     }
 
     function groupsSummary(entries) {

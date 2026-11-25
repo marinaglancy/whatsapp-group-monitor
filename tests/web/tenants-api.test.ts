@@ -78,6 +78,19 @@ describe('tenants api', () => {
     expect((await call('DELETE', `/api/tenants/${id}`)).statusCode).toBe(404)
   })
 
+  it('deletes a trigger and a tenant sent like the page sends them: no body, no content type, only the CSRF header', async () => {
+    seedGroup('a@g.us', 'A')
+    const t = seedTenant('One', ['a@g.us'])
+    const trig = seedQaTrigger(t, 'a@g.us')
+    const pageDelete = (url: string) => app.inject({ method: 'DELETE', url, headers: { cookie: auth.cookie, 'x-csrf-token': auth.csrf } })
+    const delTrigger = await pageDelete(`/api/triggers/${trig}`)
+    expect(delTrigger.statusCode).toBe(200)
+    expect(getTrigger(trig)).toBeNull()
+    const delTenant = await pageDelete(`/api/tenants/${t}`)
+    expect(delTenant.statusCode).toBe(200)
+    expect(getTenant(t)).toBeNull()
+  })
+
   it('returns tenant detail with covered groups, warnings, triggers and types', async () => {
     seedGroup('c@g.us', 'Comm', { isCommunity: true })
     seedGroup('k1@g.us', 'Kid1', { parentCommunityJid: 'c@g.us' })
