@@ -53,31 +53,58 @@ Access at http://localhost:3000 (or another port indicated in `.env`).
 2. Scan the QR code with WhatsApp (Linked Devices > Link a Device)
 3. The dashboard shows all groups the account is in, with member counts and activity stats
 
-## AI Q&A Assistant
+## Tenants and triggers
 
-You can designate **Q&A groups**: WhatsApp groups whose members can ask the bot
-questions about activity in other monitored groups: message counts, conversation
-summaries, most/least active members, poll attendance.
+Bot features are organised in **tenants**. A tenant is a set of WhatsApp groups and/or
+communities, plus the **triggers** that act on activity in them. A community entry covers
+all its groups, including ones added later. A group belongs to at most one tenant (directly
+or through its community). Groups that are in no tenant are still monitored; they just have
+no triggers. The front page shows each group's tenant.
+
+Each trigger has a name, an on/off switch and a place in the run order. Triggers run top to
+bottom, and you can drag them to reorder. A trigger can be set to run only if no earlier
+trigger fired for the same event.
+
+Currently there is one trigger type: **Questions**, the AI Q&A assistant. Members of one
+chosen group (the Q&A group) can ask the bot questions about activity in the other groups of
+the tenant: message counts, conversation summaries, most/least active members, poll
+attendance.
 
 Setup:
 
 1. Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/) and enter
-   it on the **Settings** page. The model, a daily call limit, the timezone used for all
-   dates, and the main system prompt (placeholders: `{{timezone}}`, `{{botlid}}`) are
-   configurable there too.
-2. Open the group's page in the panel, enable **Q&A assistant** in the Bot card, and
-   link the groups and/or communities it may report on. Linking a community covers all
-   its groups, including ones added later. The Q&A group itself is always included, and
-   per-group instructions can adjust the bot's tone or language.
-3. Members of the Q&A group talk to the bot by **@mentioning** the connected account
+   it on the **Settings** page. The model, a daily call limit and the timezone used for all
+   dates are configurable there too.
+2. Open the **Tenants** page (in the ⋮ menu) and click **+ New tenant**. Give it a name,
+   then use **Change...** to choose its communities and groups. A group already used by
+   another tenant is greyed out.
+3. Click **+ Add trigger** and choose **Questions**. Choose its **Q&A group**, which must be
+   one of the tenant's groups, and save.
+4. Members of the Q&A group talk to the bot by **@mentioning** the connected account
    or **replying** to one of its messages. Replying to an answer continues that
    conversation: the bot re-reads the earlier exchange. It also sees the group's
    recent messages (up to 20, at most 48 hours old) as context.
 
+On the trigger page you can also set:
+
+- **Timing**: how many seconds to wait before answering, and how old a message may be
+  (in minutes) before it is ignored.
+- **Prompt**: the main system prompt of this trigger. Empty means the default prompt
+  (**Show default** displays it). Placeholders: `{{timezone}}`, `{{botlid}}`.
+- **Additional instructions**: extra text added after the prompt, for example to set the
+  bot's tone or language.
+- **Error message**: what the bot posts when it cannot answer. Empty means the default,
+  `⚠️ Sorry, I could not answer: {{error}}`.
+
+If you used an earlier version with Q&A groups, they are converted to tenants
+automatically on the first start of this version: one tenant per Q&A group, holding that
+group and its linked groups, with one Questions trigger carrying the old instructions
+(and the old main prompt, if you had changed it).
+
 Every question becomes a **job**; see the **Bot jobs** page (linked from the status
-bar) for status, the full AI interaction trail and token usage of each one. Answers
-are based only on activity this monitor has recorded; the bot cannot see history from
-before it was connected (except what WhatsApp's history sync provided).
+bar) for status, the full AI interaction trail, token usage and the trigger that created
+it. Answers are based only on activity this monitor has recorded; the bot cannot see
+history from before it was connected (except what WhatsApp's history sync provided).
 
 For debugging, two commands answer without calling the AI: `@bot !tools` lists the
 data tools, and `@bot !tool <name> <json-args>` runs one and echoes its raw result.
@@ -89,8 +116,14 @@ A question is answered by a **function-calling loop** against Google's Gemini AP
 the group the question was asked in, and the question, then decides which data tools
 to call, reads their results, and writes the final answer (up to 8 rounds within a
 60 s budget). The last round sends no tools, only the results gathered so far, so the
-model has to answer; if it still does not, the group gets a short "could not find an
-answer" reply.
+model has to answer. The model must reply with a JSON answer: either
+`{"error": false, "output": "..."}` with the text to post, or
+`{"error": true, "errormessage": "..."}` when it cannot answer. If the answer is not valid
+JSON, the job fails.
+When a job fails for good (for example the AI is busy, the daily limit is reached, no API
+key is set, or the AI reports an error), the trigger's **error message** is posted as a
+reply, with `{{error}}` replaced by a short plain reason. Temporary errors are retried
+once first. Technical details stay in the job log.
 The tools are read-only queries over this monitor's own database:
 
 | Tool             | Returns                                                                                                                        |
@@ -101,7 +134,7 @@ The tools are read-only queries over this monitor's own database:
 | `activity_stats` | Aggregated counts per group and period: messages, edits, reactions, votes, plus contributor/engager/participant member numbers |
 | `message_search` | Full-text search (messages, captions, poll questions/options, event names, attachment filenames)                               |
 
-The tools only ever see the groups linked to the Q&A group (enforced server-side;
+The tools only ever see the tenant's groups (enforced server-side;
 the model cannot widen its own scope), all dates use the configured timezone, and
 oversized results are paged. Message _content_ the model reads it can quote; media
 files, voice messages and images are never sent, only an indication of their type.
@@ -110,21 +143,31 @@ timeline in the web panel.
 
 ### Placeholders
 
-These tokens are replaced before any text reaches the model. They work in the
-**main system prompt** (Settings) and in each group's **additional instructions**:
+These tokens are replaced before any text reaches the model. They work in a trigger's
+**prompt** and **additional instructions**:
 
 | Placeholder    | Replaced with                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `{{timezone}}` | The effective timezone from Settings (IANA name; `UTC` when blank)                                                                   |
 | `{{botlid}}`   | The bot account's own id (lid digits); the default prompt uses it so the model recognizes its earlier replies and mentions of itself |
 
+In the trigger's **error message** these placeholders work:
+
+| Placeholder    | Replaced with                                                                        |
+| -------------- | ------------------------------------------------------------------------------------ |
+| `{{error}}`    | A short reason, for example "the daily AI usage limit (200 calls) is reached"        |
+| `{{trigger}}`  | The trigger's name                                                                   |
+| `{{group}}`    | The name of the group where the message was posted                                   |
+| `{{user}}`     | The author of the message, written as a mention (`@<digits>`)                        |
+| `{{message}}`  | The text of the message, cut to about 200 characters                                 |
+
 Unknown `{{tokens}}` are left as-is.
 
 ### Privacy note
 
-When the bot answers, message content from the linked groups is sent to Google's
+When the bot answers, message content from the tenant's groups is sent to Google's
 Gemini API. On the **free tier Google uses submitted content to improve its products
-(including human review); the paid tier does not.** If the linked groups are private,
+(including human review); the paid tier does not.** If the groups are private,
 use a paid-tier API key. See Google's current Gemini API terms for details.
 
 ## Environment Variables
