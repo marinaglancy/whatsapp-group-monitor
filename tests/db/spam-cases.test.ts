@@ -71,4 +71,10 @@ describe('activity helpers', () => {
     seedMessage('a@g.us', 'u@lid', 'Buy now', 2002, { eventType: 'edit', parentId: edited, metadata: { text: 'Buy now' } })
     expect(findUserCopies(['a@g.us'], 'u@lid', 'Buy now').map(c => c.messageId).sort()).toEqual([hit, edited].sort())
   })
+  it('the latest edit decides even when edits were stored out of order', () => {
+    const id = seedMessage('a@g.us', 'u@lid', 'A', 1)
+    seedMessage('a@g.us', 'u@lid', 'Buy now', 3, { eventType: 'edit', parentId: id, metadata: { text: 'Buy now' } })
+    seedMessage('a@g.us', 'u@lid', 'X', 2, { eventType: 'edit', parentId: id, metadata: { text: 'X' } })
+    expect(findUserCopies(['a@g.us'], 'u@lid', 'Buy now').map(c => c.messageId)).toEqual([id])
+  })
 })
