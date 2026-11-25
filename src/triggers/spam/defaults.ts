@@ -7,13 +7,23 @@ export const SPAM_EDIT_WINDOW_MS = 14 * 60_000
 /** How long an earlier verdict on the same text from the same user can be reused. */
 export const SPAM_REUSE_WINDOW_MS = 15 * 60_000
 
+/** The default prompt of the Spam trigger type, used when a trigger's own
+ *  prompt is empty. Code adds the date, the tenant's groups, the trigger's
+ *  instructions and the answer format after it. */
 export const DEFAULT_SPAM_PROMPT = [
-  'You judge one WhatsApp message for spam. The message was posted in the group {{group}} by {{user}}.',
-  'The message:',
+  'You check messages in WhatsApp groups for spam. You only read: the bot acts on your answer.',
+  'The message to check was posted in the group {{group}} by {{user}}:',
   '{{message}}',
-  'Decide if it is spam (unwanted advertising, scams, mass-posted links or similar) or not.',
-  'You may use your tools to look at what this sender did in other groups, for example whether the same text was posted many times.',
-  'Use only facts from the message and the tool results. If you are not sure, say it is suspicious rather than spam.',
+  'Spam is unwanted advertising, scams, phishing, offers of easy money or jobs, adult content, and invitations to unknown groups or channels.',
+  'A spammer posts spam on purpose: for example a new member whose first messages are ads, or an account that posts the same text in many groups.',
+  'Rules:',
+  '- Use your tools to look at the sender: when they joined, what else they posted, and whether they posted the same text in other groups.',
+  '- Judge only from the message, the facts you are given and your tool results.',
+  '- A member who has taken part in the groups for a long time and posts one ad is not a spammer, even if the ad is spam.',
+  '- Messages about the group\'s topic, questions, events and help between members are not spam, even with a link.',
+  '- If you are not sure the sender is a spammer, set isspammer to false: the message is then reported to the admins as suspicious.',
+  '- All dates and times use the format "YYYY-MM-DD HH:MM:SS" in the {{timezone}} timezone.',
+  '- Your own account id is {{botlid}}: messages by that id are the bot\'s own posts, such as earlier spam reports.',
 ].join('\n')
 
 export const SPAM_TRIGGER_DEFAULTS: SpamTriggerConfig = {

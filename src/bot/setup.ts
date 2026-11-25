@@ -5,7 +5,7 @@ import {
 } from './responder.js'
 import { addJobEvent, hasJobEvent } from '../db/queries/jobs.js'
 import { getSock } from '../whatsapp/client.js'
-import { postGroupMessage } from '../whatsapp/actions.js'
+import { editGroupMessage, postGroupMessage } from '../whatsapp/actions.js'
 import { getCreationRecord } from '../db/queries/activity.js'
 import { getAiSettings } from '../ai/settings.js'
 import { executeQaTool, toolExecutorNames } from '../ai/tools/executors.js'
@@ -15,6 +15,7 @@ import { logger } from '../utils/logger.js'
 import { registerBuiltinTriggerTypes } from '../triggers/index.js'
 import { buildTriggerErrorNotifier } from '../triggers/error-notifier.js'
 import { TriggerGoneError, TriggerJobError } from '../triggers/errors.js'
+import { createSpamHandler, spamErrorTarget, type SpamDeps } from '../triggers/spam/handler.js'
 
 const TOOL_ECHO_CROP = 3_000
 const TOOL_ECHO_LOG_MAX = 2_000
@@ -122,14 +123,24 @@ function createQaJobHandler(deps: QaResponderDeps): JobHandler {
   }
 }
 
+/** Retry rule of the AI jobs: only errors that another attempt can fix. A
+ *  TriggerJobError has a known cause (it may quote the AI's own words, which
+ *  can sound transient); a gone trigger stays gone. */
+function shouldRetryAiJob(err: unknown): boolean {
+  return !(err instanceof TriggerJobError) && !(err instanceof TriggerGoneError) && isTransientAiError(err)
+}
+
+export type BotOverrides = Partial<QaResponderDeps> & Partial<Pick<SpamDeps, 'post' | 'edit'>>
+
 /** Register all bot job handlers. `overrides` exists for tests. */
-export function setupBot(overrides: Partial<QaResponderDeps> = {}): void {
+export function setupBot(overrides: BotOverrides = {}): void {
   registerBuiltinTriggerTypes()
+  const { post, edit, ...qaOverrides } = overrides
   const deps: QaResponderDeps = {
     createProvider: createGeminiProvider,
     sendReply: sendJobReply,
     setComposing,
-    ...overrides,
+    ...qaOverrides,
   }
   registerJobHandler('qa_answer', createQaJobHandler(deps), {
     // errors are a reply to the question, every time
@@ -137,8 +148,18 @@ export function setupBot(overrides: Partial<QaResponderDeps> = {}): void {
       send: async (job, _t, text) => ({ groupJid: job.groupJid!, messageId: await deps.sendReply(job, text) }),
       throttleMs: 0,
     }),
-    // a TriggerJobError has a known cause (it may quote the AI's own words,
-    // which can sound transient); a gone trigger stays gone
-    shouldRetry: err => !(err instanceof TriggerJobError) && !(err instanceof TriggerGoneError) && isTransientAiError(err),
+    shouldRetry: shouldRetryAiJob,
+  })
+
+  const spamDeps: SpamDeps = {
+    createProvider: deps.createProvider,
+    post: post ?? postGroupMessage,
+    edit: edit ?? editGroupMessage,
+    nowMs: deps.nowMs,
+  }
+  registerJobHandler('spam_check', createSpamHandler(spamDeps), {
+    // errors go to the notification group, at most once every 10 minutes per trigger
+    onFailure: buildTriggerErrorNotifier(spamErrorTarget(spamDeps.post)),
+    shouldRetry: shouldRetryAiJob,
   })
 }

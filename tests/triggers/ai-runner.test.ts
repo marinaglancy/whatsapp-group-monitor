@@ -118,6 +118,25 @@ describe('runAiAnswer', () => {
     expect(provider.calls.length).toBe(1)
   })
 
+  it('ends the final round with the given note, and with the default note when none is given', async () => {
+    const note = 'You cannot call tools any more. Answer now with the verdict.'
+    const withNote = fakeProvider([toolRound(), verdict(''), verdict('spam')])
+    await runAiAnswer(options(withNote, { finalRoundNote: note }))
+    const finalTurn = withNote.calls[2].messages.at(-1) as { role: string; text: string }
+    expect(finalTurn.role).toBe('user')
+    expect(finalTurn.text.startsWith('Is this spam?')).toBe(true)
+    expect(finalTurn.text).toContain('Their results:')
+    expect(finalTurn.text.endsWith(`\n\n${note}`)).toBe(true)
+    expect(finalTurn.text).not.toContain('output')
+
+    const withoutNote = fakeProvider([verdict(''), verdict('spam')])
+    await runAiAnswer(options(withoutNote))
+    expect((withoutNote.calls[1].messages.at(-1) as { text: string }).text.endsWith(
+      'You cannot call tools any more. Answer now with the JSON object described in the answer format, '
+      + 'using only the results above. If something is still missing, say briefly what in output.',
+    )).toBe(true)
+  })
+
   it('sends no tools on the last round', async () => {
     const provider = fakeProvider([...Array.from({ length: AI_MAX_ROUNDS - 1 }, toolRound), verdict('spam')])
     await runAiAnswer(options(provider))

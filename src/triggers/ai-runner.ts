@@ -20,7 +20,8 @@ export const AI_JOB_TIMEOUT_MS = 60_000
 export const AI_FINAL_ROUND_RESERVE_MS = AI_CALL_TIMEOUT_MS
 export const TOOL_RESULT_LOG_MAX = 2_000
 
-/** Ends the last round's question: no tools are sent, so the model must answer. */
+/** Ends the last round's question: no tools are sent, so the model must answer.
+ *  The default names Mentions' answer field; other types pass their own note. */
 const FINAL_ROUND_NOTE = 'You cannot call tools any more. Answer now with the JSON object described in the answer format, '
   + 'using only the results above. If something is still missing, say briefly what in output.'
 
@@ -41,6 +42,8 @@ export interface AiRunOptions<T extends AiAnswerBase> {
   round1Request: Record<string, unknown>
   /** Whether a valid answer is usable; false is treated like an invalid answer. */
   accept(answer: T): boolean
+  /** Ends the last round's question; defaults to Mentions' note. */
+  finalRoundNote?: string
 }
 
 /** Runs the function-calling loop until the AI gives an accepted answer, and
@@ -63,7 +66,7 @@ export async function runAiAnswer<T extends AiAnswerBase>(o: AiRunOptions<T>): P
 
     const started = now()
     const resp = await provider.generate(toolsOff
-      ? { system, messages: buildFinalRoundMessages(messages, historyTurns), tools: [], responseSchema: spec.modelSchema }
+      ? { system, messages: buildFinalRoundMessages(messages, historyTurns, o.finalRoundNote), tools: [], responseSchema: spec.modelSchema }
       : { system, messages, tools, ...(SEND_ANSWER_SCHEMA_WITH_TOOLS ? { responseSchema: spec.modelSchema } : {}) })
     addJobAiUsage(job.id, { calls: 1, tokensIn: resp.usage.tokensIn, tokensOut: resp.usage.tokensOut })
     addJobEvent(job.id, 'ai_call', {
@@ -123,7 +126,9 @@ export async function runAiAnswer<T extends AiAnswerBase>(o: AiRunOptions<T>): P
 /** The last round's conversation. Gemini keeps calling tools, even made-up
  *  ones, when the history is full of tool calls, so those calls and their
  *  results are folded into the question as plain text. */
-export function buildFinalRoundMessages(messages: AiChatMessage[], historyTurns: number): AiChatMessage[] {
+export function buildFinalRoundMessages(
+  messages: AiChatMessage[], historyTurns: number, note: string = FINAL_ROUND_NOTE,
+): AiChatMessage[] {
   const first = messages[historyTurns] as Extract<AiChatMessage, { role: 'user' }>
   const results: string[] = []
   let calls: AiToolCall[] = []
@@ -138,7 +143,7 @@ export function buildFinalRoundMessages(messages: AiChatMessage[], historyTurns:
   }
   const parts = [first.text]
   if (results.length) parts.push('You already called tools for this question. Their results:', results.join('\n\n'))
-  parts.push(FINAL_ROUND_NOTE)
+  parts.push(note)
   return [...messages.slice(0, historyTurns), { role: 'user', text: parts.join('\n\n') }]
 }
 
