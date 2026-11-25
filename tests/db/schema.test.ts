@@ -37,10 +37,10 @@ describe('bot job tables', () => {
     expect(cols).toContain('description')
   })
 
-  it('enforces unique (job_type, group_jid, message_id) when message_id is set', () => {
+  it('enforces unique (job_type, trigger_id, group_jid, message_id) when message_id is set', () => {
     const db = getAccountDb()
-    const ins = sql`INSERT INTO bot_jobs (job_type, group_jid, message_id, run_at, created_at, updated_at)
-                    VALUES ('qa_answer', 'g1@g.us', 'M1', 1, 1, 1)`
+    const ins = sql`INSERT INTO bot_jobs (job_type, group_jid, message_id, run_at, trigger_id, created_at, updated_at)
+                    VALUES ('qa_answer', 'g1@g.us', 'M1', 1, 1, 1, 1)`
     db.run(ins)
     let thrown: unknown
     try {
@@ -85,5 +85,60 @@ describe('bot job tables', () => {
     expect(cols).toEqual(freshCols)
     closeAccountDb()
     initAccountDb(TEST_PHONE) // restore for afterEach cleanup symmetry
+  })
+})
+
+describe('tenant and trigger tables', () => {
+  const uniqueError = (fn: () => void) => {
+    let thrown: unknown
+    try { fn() } catch (err) { thrown = err }
+    expect(thrown).toBeDefined()
+    return String((thrown as { cause?: unknown }).cause ?? thrown)
+  }
+
+  it('creates tenants, tenant_groups and bot_triggers', () => {
+    expect(tableNames()).toEqual(expect.arrayContaining(['tenants', 'tenant_groups', 'bot_triggers']))
+  })
+
+  it('adds trigger_id to bot_jobs', () => {
+    const cols = (getAccountDb().all(sql`SELECT name FROM pragma_table_info('bot_jobs')`) as { name: string }[]).map(c => c.name)
+    expect(cols).toContain('trigger_id')
+  })
+
+  it('allows the same message for two triggers but not twice for one', () => {
+    const ins = (t: number) => getAccountDb().run(sql`INSERT INTO bot_jobs (job_type, group_jid, message_id, run_at, trigger_id, created_at, updated_at) VALUES ('qa_answer', 'g@g.us', 'M1', 0, ${t}, 0, 0)`)
+    ins(1); ins(2)
+    expect(uniqueError(() => ins(1))).toMatch(/UNIQUE/)
+  })
+
+  it('still rejects a duplicate message when trigger_id is NULL (legacy jobs)', () => {
+    const ins = () => getAccountDb().run(sql`INSERT INTO bot_jobs (job_type, group_jid, message_id, run_at, created_at, updated_at) VALUES ('qa_answer', 'g@g.us', 'M1', 0, 0, 0)`)
+    ins()
+    expect(uniqueError(ins)).toMatch(/UNIQUE/)
+  })
+
+  it('replaces the old unique index on an existing database', () => {
+    closeAccountDb()
+    const phone = '15550000003'
+    const dir = join(config.dataDir, phone)
+    mkdirSync(dir, { recursive: true })
+    const raw = new Database(join(dir, 'account.db'))
+    raw.exec(`CREATE TABLE bot_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, job_type TEXT NOT NULL, group_jid TEXT, user_jid TEXT,
+      message_id TEXT, payload TEXT, status TEXT NOT NULL DEFAULT 'pending', run_at INTEGER NOT NULL,
+      expires_at INTEGER, attempts INTEGER NOT NULL DEFAULT 0, ai_calls INTEGER NOT NULL DEFAULT 0,
+      ai_tokens_in INTEGER NOT NULL DEFAULT 0, ai_tokens_out INTEGER NOT NULL DEFAULT 0,
+      result TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE UNIQUE INDEX idx_bot_jobs_type_group_msg
+        ON bot_jobs(job_type, group_jid, message_id) WHERE message_id IS NOT NULL;`)
+    raw.close()
+    initAccountDb(phone)
+    const idx = (getAccountDb().all(sql`SELECT name FROM sqlite_master WHERE type='index'`) as { name: string }[]).map(r => r.name)
+    expect(idx).toContain('idx_bot_jobs_type_trigger_group_msg')
+    expect(idx).not.toContain('idx_bot_jobs_type_group_msg')
+    const cols = (getAccountDb().all(sql`SELECT name FROM pragma_table_info('bot_jobs')`) as { name: string }[]).map(c => c.name)
+    expect(cols[cols.length - 1]).toBe('trigger_id')
+    closeAccountDb()
+    initAccountDb(TEST_PHONE)
   })
 })

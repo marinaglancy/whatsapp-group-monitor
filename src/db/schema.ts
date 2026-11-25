@@ -118,6 +118,7 @@ export const botJobs = sqliteTable('bot_jobs', {
   error: text('error'),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  triggerId: integer('trigger_id'),
 })
 
 export type BotJob = typeof botJobs.$inferSelect
@@ -134,3 +135,33 @@ export const botJobEvents = sqliteTable('bot_job_events', {
 })
 
 export type BotJobEvent = typeof botJobEvents.$inferSelect
+
+export const tenants = sqliteTable('tenants', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+})
+
+export type Tenant = typeof tenants.$inferSelect
+
+export const tenantGroups = sqliteTable('tenant_groups', {
+  jid: text('jid').primaryKey(),
+  tenantId: integer('tenant_id').notNull().references(() => tenants.id),
+})
+
+export type TenantGroup = typeof tenantGroups.$inferSelect
+
+export const botTriggers = sqliteTable('bot_triggers', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  tenantId: integer('tenant_id').notNull().references(() => tenants.id),
+  type: text('type').notNull(),
+  name: text('name').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  sortOrder: integer('sort_order').notNull(),
+  config: text('config', { mode: 'json' }).$type<Record<string, unknown>>(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+})
+
+export type BotTrigger = typeof botTriggers.$inferSelect

@@ -28,24 +28,9 @@ export function checkpointAccountDb() {
   accountSqlite?.pragma('wal_checkpoint(FULL)')
 }
 
-export function initAccountDb(phone: string) {
-  // If already open for the same phone, skip
-  if (currentPhone === phone && db) return db
-
-  // Close previous if different phone
-  closeAccountDb()
-
-  const accountDir = resolve(config.dataDir, phone)
-  mkdirSync(accountDir, { recursive: true })
-
-  const dbPath = resolve(accountDir, 'account.db')
-  const sqlite = new Database(dbPath)
-  accountSqlite = sqlite
-  sqlite.pragma('journal_mode = WAL')
-  sqlite.pragma('foreign_keys = ON')
-
-  db = drizzle(sqlite, { schema })
-
+/** Creates/migrates every account.db table. `opts` is unused until the legacy Q&A prompt migration. */
+export function ensureAccountSchema(sqlite: Database.Database, opts: { legacyQaPrompt: string | null }): void {
+  void opts
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS groups (
       jid TEXT PRIMARY KEY,
@@ -121,12 +106,11 @@ export function initAccountDb(phone: string) {
       result TEXT,
       error TEXT,
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      trigger_id INTEGER
     );
 
     CREATE INDEX IF NOT EXISTS idx_bot_jobs_status_run ON bot_jobs(status, run_at);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_jobs_type_group_msg
-      ON bot_jobs(job_type, group_jid, message_id) WHERE message_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS bot_job_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -141,6 +125,34 @@ export function initAccountDb(phone: string) {
 
     CREATE INDEX IF NOT EXISTS idx_bot_job_events_job ON bot_job_events(job_id);
     CREATE INDEX IF NOT EXISTS idx_bot_job_events_message ON bot_job_events(message_id);
+
+    CREATE TABLE IF NOT EXISTS tenants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tenant_groups (
+      jid TEXT PRIMARY KEY,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tenant_groups_tenant ON tenant_groups(tenant_id);
+
+    CREATE TABLE IF NOT EXISTS bot_triggers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tenant_id INTEGER NOT NULL REFERENCES tenants(id),
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL,
+      config TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bot_triggers_tenant_order ON bot_triggers(tenant_id, sort_order);
   `)
 
   // Migrations: drop columns that are no longer needed
@@ -157,6 +169,17 @@ export function initAccountDb(phone: string) {
   if (actCols.includes('processed')) {
     sqlite.exec('ALTER TABLE group_activity_log DROP COLUMN processed')
   }
+
+  const jobCols = (sqlite.pragma('table_info(bot_jobs)') as { name: string }[]).map(c => c.name)
+  if (!jobCols.includes('trigger_id')) {
+    sqlite.exec('ALTER TABLE bot_jobs ADD COLUMN trigger_id INTEGER')
+  }
+  // one job per (type, trigger, group, message); replaces the pre-trigger key
+  sqlite.exec(`
+    DROP INDEX IF EXISTS idx_bot_jobs_type_group_msg;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_bot_jobs_type_trigger_group_msg
+      ON bot_jobs(job_type, COALESCE(trigger_id, 0), group_jid, message_id) WHERE message_id IS NOT NULL;
+  `)
 
   const memberCols = (sqlite.pragma('table_info(group_members)') as { name: string }[]).map(c => c.name)
   if (!memberCols.includes('last_read_at')) {
@@ -209,6 +232,27 @@ export function initAccountDb(phone: string) {
       INSERT INTO messages_fts(rowid, text) VALUES (new.id, ${ftsTextSqlExpr('new.')});
     END;
   `)
+}
+
+export function initAccountDb(phone: string) {
+  // If already open for the same phone, skip
+  if (currentPhone === phone && db) return db
+
+  // Close previous if different phone
+  closeAccountDb()
+
+  const accountDir = resolve(config.dataDir, phone)
+  mkdirSync(accountDir, { recursive: true })
+
+  const dbPath = resolve(accountDir, 'account.db')
+  const sqlite = new Database(dbPath)
+  accountSqlite = sqlite
+  sqlite.pragma('journal_mode = WAL')
+  sqlite.pragma('foreign_keys = ON')
+
+  db = drizzle(sqlite, { schema })
+
+  ensureAccountSchema(sqlite, { legacyQaPrompt: null })
 
   currentPhone = phone
   logger.info({ phone, path: dbPath }, 'Account database initialized')
