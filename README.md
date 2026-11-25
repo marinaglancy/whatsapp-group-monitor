@@ -234,6 +234,9 @@ The same text from the same user is often posted in several groups. If the trigg
 reported that user and text less than about 15 minutes ago (the time WhatsApp allows for
 editing a message), the earlier report is **edited** to add the new group instead of posting
 a new one, and the AI's earlier verdict is reused, so a wave of copies costs one AI call.
+A "copy" is another message by the same user with the same text (ignoring extra spaces)
+that is not deleted. Copies count only if they were posted in the last 24 hours; older ones
+are not listed in the report and are not shown to the AI.
 Messages without text are never merged. If editing would lose the tappable group mentions,
 a new report is posted instead.
 

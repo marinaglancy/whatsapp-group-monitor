@@ -169,8 +169,9 @@ export function isMessageDeleted(groupJid: string, messageId: string): boolean {
     )).limit(1).get()
 }
 
-/** The user's undeleted messages in these groups whose latest text (the last edit, if any) normalizes to textKey. */
-export function findUserCopies(groupJids: string[], userJid: string, textKey: string): { groupJid: string; messageId: string; timestamp: number }[] {
+/** The user's undeleted messages in these groups, posted at or after sinceTs (unix seconds),
+ *  whose latest text (the last edit, if any) normalizes to textKey. */
+export function findUserCopies(groupJids: string[], userJid: string, textKey: string, sinceTs: number): { groupJid: string; messageId: string; timestamp: number }[] {
   if (groupJids.length === 0) return []
   const db = getAccountDb()
   const textOf = sql<string | null>`json_extract(${groupActivityLog.metadata}, '$.text')`
@@ -184,6 +185,7 @@ export function findUserCopies(groupJids: string[], userJid: string, textKey: st
       inArray(groupActivityLog.groupJid, groupJids),
       eq(groupActivityLog.userJid, userJid),
       eq(groupActivityLog.eventType, 'message'),
+      gte(groupActivityLog.timestamp, sinceTs),
     )).all()
   if (messages.length === 0) return []
   const key = (g: string, id: string) => `${g}\u0000${id}`

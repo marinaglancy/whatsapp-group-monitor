@@ -271,8 +271,8 @@ describe('spam_check handler: what the AI is given', () => {
 
   it('lists every copy with its group and its time in the configured timezone, oldest first', async () => {
     setSetting('timezone', 'Europe/Lisbon')
-    const weekAgo = NOW_S - 7 * 86_400
-    seedCopy('b@g.us', TEXT, 'conversation', weekAgo)
+    const earlier = NOW_S - 20 * 3600
+    seedCopy('b@g.us', TEXT, 'conversation', earlier)
     seedCopy('c@g.us', TEXT, 'conversation', NOW_S - 20)
     const provider = fakeProvider([verdict(false, false)])
     await makeHandler(provider)(copyJob('a@g.us'))
@@ -280,11 +280,24 @@ describe('spam_check handler: what the AI is given', () => {
     const turn = (provider.calls[0].messages[0] as { text: string }).text
     expect(turn).toContain([
       'Copies: the sender posted 3 messages with this text (this one included, deleted ones not counted):',
-      `- "Beta" (b@g.us) at ${formatDateTime(weekAgo, 'Europe/Lisbon')}`,
+      `- "Beta" (b@g.us) at ${formatDateTime(earlier, 'Europe/Lisbon')}`,
       `- "Gamma" (c@g.us) at ${formatDateTime(NOW_S - 20, 'Europe/Lisbon')}`,
       `- "Alpha" (a@g.us) at ${formatDateTime(NOW_S - 10, 'Europe/Lisbon')} (this message)`,
       '',
     ].join('\n'))
+  })
+
+  it('counts only copies from the last 24 hours', async () => {
+    seedCopy('b@g.us', TEXT, 'conversation', NOW_S - 25 * 3600)
+    seedCopy('c@g.us', TEXT, 'conversation', NOW_S - 3600)
+    const provider = fakeProvider([verdict(true, true)])
+    await makeHandler(provider)(copyJob('a@g.us'))
+
+    expect(posts).toEqual([{ groupJid: 'rep@g.us', text: spammerText(['c', 'a']) }])
+    const turn = (provider.calls[0].messages[0] as { text: string }).text
+    expect(turn).toContain('2 messages with this text')
+    expect(turn).toContain('"Gamma" (c@g.us)')
+    expect(turn).not.toContain('"Beta" (b@g.us)')
   })
 
   it('neutralises lines in the sender\'s text that look like a marker, so only the real ones start and end it', async () => {

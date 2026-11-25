@@ -6,6 +6,8 @@ export const SPAM_DEFAULT_ERROR_TEMPLATE = '⚠️ Spam check failed for a messa
 export const SPAM_EDIT_WINDOW_MS = 14 * 60_000
 /** How long an earlier verdict on the same text from the same user can be reused. */
 export const SPAM_REUSE_WINDOW_MS = 15 * 60_000
+/** Only the sender's copies posted within this time count. */
+export const SPAM_COPY_WINDOW_MS = 24 * 3600_000
 
 /** The default prompt of the Spam trigger type, used when a trigger's own
  *  prompt is empty. Code adds the date, the tenant's groups, the trigger's

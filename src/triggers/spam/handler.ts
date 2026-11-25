@@ -5,7 +5,7 @@ import { buildScopeListing, checkDailyLimit, runAiAnswer } from '../ai-runner.js
 import { ERROR_TEXT, TriggerGoneError, TriggerJobError } from '../errors.js'
 import type { ErrorTarget } from '../error-notifier.js'
 import { spamTriggerType, type SpamTriggerConfig } from './type.js'
-import { SPAM_EDIT_WINDOW_MS, SPAM_REUSE_WINDOW_MS } from './defaults.js'
+import { SPAM_COPY_WINDOW_MS, SPAM_EDIT_WINDOW_MS, SPAM_REUSE_WINDOW_MS } from './defaults.js'
 import { SPAM_ANSWER_SPEC } from './answer.js'
 import { normalizeText, spammerReport, suspiciousReport } from './report.js'
 import { resolveTenantScope, type QaScope } from '../../bot/scope.js'
@@ -122,7 +122,7 @@ export function createSpamHandler(deps: SpamDeps): JobHandler {
     // known up front: no AI call
     checkReportGroup(trigger.tenantId, config.reportGroupJid)
 
-    const copies = findCopies(msg, scope)
+    const copies = findCopies(msg, scope, now)
     const found = msg.textKey ? findRecentCase(trigger.id, msg.userJid, msg.textKey, now() - SPAM_REUSE_WINDOW_MS) : null
     const verdict = found ? found.verdict : await judge(job, deps, now, { msg, copies, config, scope })
     // a text message keeps its verdict, and later its report, for the rest of the wave
@@ -158,13 +158,13 @@ function checkedMessage(job: BotJob, now: () => number): CheckedMessage {
   }
 }
 
-/** The sender's undeleted messages with the same text in the tenant's groups,
- *  oldest first. The job's own message is always one of them (its stored text
+/** The sender's undeleted messages with the same text in the tenant's groups
+ *  from the last 24 hours, oldest first. The job's own message is always one of them (its stored text
  *  may have been edited since); a message without text has no other copies. */
-function findCopies(msg: CheckedMessage, scope: QaScope): Copy[] {
+function findCopies(msg: CheckedMessage, scope: QaScope, now: () => number): Copy[] {
   const own: Copy = { groupJid: msg.groupJid, messageId: msg.messageId, timestamp: msg.timestamp }
   if (!msg.textKey) return [own]
-  const copies = findUserCopies(scope.groupJids, msg.userJid, msg.textKey)
+  const copies = findUserCopies(scope.groupJids, msg.userJid, msg.textKey, Math.floor((now() - SPAM_COPY_WINDOW_MS) / 1000))
   if (!copies.some(c => c.groupJid === own.groupJid && c.messageId === own.messageId)) copies.push(own)
   return copies.sort((a, b) => a.timestamp - b.timestamp || a.groupJid.localeCompare(b.groupJid))
 }
