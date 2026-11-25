@@ -173,33 +173,48 @@ export function isMessageDeleted(groupJid: string, messageId: string): boolean {
 export function findUserCopies(groupJids: string[], userJid: string, textKey: string): { groupJid: string; messageId: string; timestamp: number }[] {
   if (groupJids.length === 0) return []
   const db = getAccountDb()
-  const messages = db.select().from(groupActivityLog)
+  const textOf = sql<string | null>`json_extract(${groupActivityLog.metadata}, '$.text')`
+  const messages = db.select({
+    groupJid: groupActivityLog.groupJid,
+    messageId: groupActivityLog.messageId,
+    timestamp: groupActivityLog.timestamp,
+    text: textOf,
+  }).from(groupActivityLog)
     .where(and(
       inArray(groupActivityLog.groupJid, groupJids),
       eq(groupActivityLog.userJid, userJid),
       eq(groupActivityLog.eventType, 'message'),
     )).all()
   if (messages.length === 0) return []
-  const related = db.select().from(groupActivityLog)
-    .where(and(
-      inArray(groupActivityLog.groupJid, groupJids),
-      inArray(groupActivityLog.eventType, ['edit', 'delete']),
-      inArray(groupActivityLog.parentId, messages.map(m => m.messageId)),
-    ))
-    .orderBy(groupActivityLog.timestamp, groupActivityLog.id).all()
   const key = (g: string, id: string) => `${g}\u0000${id}`
   const deleted = new Set<string>()
-  const latest = new Map<string, string | undefined>()
-  for (const r of related) {
-    const k = key(r.groupJid, r.parentId!)
-    if (r.eventType === 'delete') deleted.add(k)
-    else latest.set(k, r.metadata?.text as string | undefined)
+  const latest = new Map<string, string | null>()
+  // chunked: SQLite limits the number of bound variables
+  const CHUNK = 500
+  for (let i = 0; i < messages.length; i += CHUNK) {
+    const related = db.select({
+      groupJid: groupActivityLog.groupJid,
+      parentId: groupActivityLog.parentId,
+      eventType: groupActivityLog.eventType,
+      text: textOf,
+    }).from(groupActivityLog)
+      .where(and(
+        inArray(groupActivityLog.groupJid, groupJids),
+        inArray(groupActivityLog.eventType, ['edit', 'delete']),
+        inArray(groupActivityLog.parentId, messages.slice(i, i + CHUNK).map(m => m.messageId)),
+      ))
+      .orderBy(groupActivityLog.timestamp, groupActivityLog.id).all()
+    for (const r of related) {
+      const k = key(r.groupJid, r.parentId!)
+      if (r.eventType === 'delete') deleted.add(k)
+      else latest.set(k, r.text)
+    }
   }
   const out: { groupJid: string; messageId: string; timestamp: number }[] = []
   for (const m of messages) {
     const k = key(m.groupJid, m.messageId)
     if (deleted.has(k)) continue
-    const text = latest.has(k) ? latest.get(k) : (m.metadata?.text as string | undefined)
+    const text = latest.has(k) ? latest.get(k) : m.text
     if (typeof text !== 'string' || normalizeText(text) !== textKey) continue
     out.push({ groupJid: m.groupJid, messageId: m.messageId, timestamp: m.timestamp })
   }
