@@ -3,12 +3,13 @@ import { join } from 'path'
 import type { FastifyInstance } from 'fastify'
 import { setupTestDbs, TEST_PHONE } from '../helpers/db.js'
 import { seedGroup, seedUser, seedMember, seedMessage } from '../helpers/fixtures.js'
-import { makePreBotBackup } from '../helpers/backup.js'
+import { makePreBotBackup, makeBackupDb, NEW_GROUPS_DDL } from '../helpers/backup.js'
 import { buildTestApp, loginTestApp } from '../helpers/web.js'
 import { mergeAccountDb } from '../../src/web/routes/backup.js'
 import { replaceAccountDbFile, getAccountDb } from '../../src/db/account.js'
 import { getGroup } from '../../src/db/queries/groups.js'
 import { insertJob, listJobs } from '../../src/db/queries/jobs.js'
+import { listTenants, getTenantEntries } from '../../src/db/queries/tenants.js'
 import { executeQaTool } from '../../src/ai/tools/executors.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
@@ -77,6 +78,19 @@ describe('restore by replace', () => {
     expect(insertJob({ jobType: 'qa_answer', groupJid: 'old@g.us', messageId: 'Q1', runAt: NOW_S })).not.toBeNull()
     // old messages are searchable (index built from the restored rows)
     expect(searchHits('lighthouse', ['old@g.us'])).toBe(1)
+  })
+})
+
+describe('restore by replace with an old Q&A backup', () => {
+  it('replace with an old backup converts its Q&A groups on open', () => {
+    const backup = join(dbs.dir, 'old-qa.db')
+    makeBackupDb(backup, NEW_GROUPS_DDL, `
+      INSERT INTO groups (jid, name, is_community, bot_membership, bot_functions, is_archived, created_at, bot_config)
+      VALUES ('qa@g.us', 'Admins', 0, 'participant', 1, 0, 1700000000000, '{"qa":{"linkedJids":["x@g.us"]}}')`)
+    replaceAccountDbFile(TEST_PHONE, backup)
+    const [t] = listTenants()
+    expect(t.name).toBe('Admins')
+    expect(getTenantEntries(t.id).sort()).toEqual(['qa@g.us', 'x@g.us'])
   })
 })
 

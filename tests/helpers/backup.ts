@@ -11,6 +11,14 @@ export const NEW_GROUPS_DDL = OLD_GROUPS_DDL.replace(
   'created_at INTEGER NOT NULL, bot_config TEXT)',
 )
 
+// tenant tables as a current backup has them
+export const TENANT_DDL = `
+CREATE TABLE tenants (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE tenant_groups (jid TEXT PRIMARY KEY, tenant_id INTEGER NOT NULL REFERENCES tenants(id));
+CREATE TABLE bot_triggers (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL REFERENCES tenants(id), type TEXT NOT NULL,
+  name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, sort_order INTEGER NOT NULL, config TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+`
+
 // the other tables the merge touches, current shape. Every real backup has
 // last_read_at: the backup feature arrived hours after that column.
 export const SUPPORT_DDL = `

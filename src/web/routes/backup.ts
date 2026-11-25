@@ -13,11 +13,14 @@ import { logger } from '../../utils/logger.js'
 import { sendPage, cleanupTmpUploads } from '../server.js'
 import { requireAuth, requireAuthApi, generateCsrf, verifyCsrf } from '../middleware/auth.js'
 import { checkpointSharedDb } from '../../db/shared.js'
-import { checkpointAccountDb, getAccountPhone, replaceAccountDbFile } from '../../db/account.js'
-import { setSetting } from '../../db/queries/settings.js'
+import { checkpointAccountDb, getAccountPhone, replaceAccountDbFile, ensureAccountSchema } from '../../db/account.js'
+import { getSetting, setSetting } from '../../db/queries/settings.js'
 import { getSock } from '../../whatsapp/client.js'
 import { getConnectionState } from '../../whatsapp/handlers/connection.js'
 import { syncGroups } from '../../whatsapp/handlers/group-sync.js'
+import { convertLegacyQaGroups, readMembershipSnapshot, insertIncomingTenant, type IncomingTenant, type IncomingTrigger, type LegacyQaGroup } from '../../tenants/import.js'
+import { findConflicts } from '../../tenants/membership.js'
+import type { GroupBotConfig } from '../../db/schema.js'
 
 const pipeline = promisify(streamPipeline)
 
@@ -47,10 +50,52 @@ function restoreSettings(backupDbPath: string) {
   }
 }
 
-export function mergeAccountDb(phone: string, backupDbPath: string) {
+function backupHasTable(db: Database.Database, table: string): boolean {
+  return !!db.prepare("SELECT name FROM backup.sqlite_master WHERE type='table' AND name=?").get(table)
+}
+
+function parseJsonObject(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+  } catch { return null }
+}
+
+/** The tenants a backup holds: its own tenant tables, or (older backups) its old Q&A groups converted. */
+function readBackupTenants(db: Database.Database): IncomingTenant[] {
+  if (backupHasTable(db, 'tenants') && backupHasTable(db, 'tenant_groups')) {
+    const tenants = db.prepare('SELECT id, name FROM backup.tenants ORDER BY id').all() as { id: number; name: string }[]
+    const jidRows = db.prepare('SELECT jid, tenant_id FROM backup.tenant_groups').all() as { jid: string; tenant_id: number }[]
+    const triggerRows = backupHasTable(db, 'bot_triggers')
+      ? db.prepare('SELECT tenant_id, type, name, enabled, sort_order, config FROM backup.bot_triggers ORDER BY sort_order, id').all() as
+        { tenant_id: number; type: string; name: string; enabled: number; sort_order: number; config: string | null }[]
+      : []
+    return tenants.map(t => ({
+      name: t.name,
+      jids: jidRows.filter(r => r.tenant_id === t.id).map(r => r.jid),
+      triggers: triggerRows.filter(r => r.tenant_id === t.id).map((r): IncomingTrigger => ({
+        type: r.type, name: r.name, enabled: r.enabled !== 0, sortOrder: r.sort_order, config: parseJsonObject(r.config) ?? {},
+      })),
+    }))
+  }
+  const hasBotConfig = (db.pragma('backup.table_info(groups)') as { name: string }[]).some(c => c.name === 'bot_config')
+  const rows = db.prepare(`SELECT jid, name, bot_functions, ${hasBotConfig ? 'bot_config' : 'NULL AS bot_config'}, created_at FROM backup.groups`)
+    .all() as { jid: string; name: string; bot_functions: number; bot_config: string | null; created_at: number }[]
+  const legacy: LegacyQaGroup[] = rows.map(r => ({
+    jid: r.jid, name: r.name, botFunctions: r.bot_functions,
+    botConfig: parseJsonObject(r.bot_config) as GroupBotConfig | null, createdAt: r.created_at,
+  }))
+  return convertLegacyQaGroups(legacy, getSetting('ai_system_prompt'))
+}
+
+export function mergeAccountDb(phone: string, backupDbPath: string): { skippedTenants: { name: string; conflicts: string[] }[] } {
+  const skippedTenants: { name: string; conflicts: string[] }[] = []
   const mainDbPath = resolve(config.dataDir, phone, 'account.db')
   const db = new Database(mainDbPath)
   db.pragma('foreign_keys = OFF')
+  // a live database the new code never opened has no tenants yet; convert its own Q&A groups first
+  ensureAccountSchema(db, { legacyQaPrompt: getSetting('ai_system_prompt') })
   const escaped = backupDbPath.replace(/'/g, "''")
   db.exec(`ATTACH DATABASE '${escaped}' AS backup`)
 
@@ -118,11 +163,24 @@ export function mergeAccountDb(phone: string, backupDbPath: string) {
       SELECT group_jid, user_jid, message_id, parent_id, event_type, metadata, raw, timestamp, created_at
       FROM backup.group_activity_log
     `)
+
+    // tenants last: the merged groups (and their communities) must be known to the conflict check
+    const { entries, groups } = readMembershipSnapshot(db)
+    for (const tenant of readBackupTenants(db)) {
+      const conflicts = findConflicts(null, tenant.jids, entries, groups)
+      if (conflicts.length > 0) {
+        skippedTenants.push({ name: tenant.name, conflicts })
+        continue
+      }
+      const id = insertIncomingTenant(db, tenant)
+      for (const jid of tenant.jids) entries.set(jid, id)
+    }
   })()
 
   db.exec('DETACH DATABASE backup')
   db.pragma('foreign_keys = ON')
   db.close()
+  return { skippedTenants }
 }
 
 export function registerBackupRoutes(app: FastifyInstance) {
@@ -288,8 +346,12 @@ export function registerBackupRoutes(app: FastifyInstance) {
           writeFileSync(tmpPath, entry.getData())
           try {
             if (action === 'merge') {
-              mergeAccountDb(phone, tmpPath)
+              const { skippedTenants } = mergeAccountDb(phone, tmpPath)
               details.push(`Data for +${phone} merged`)
+              for (const t of skippedTenants) {
+                logger.warn({ phone, tenant: t.name, groups: t.conflicts }, 'Backup tenant skipped: its groups already belong to another tenant')
+                details.push(`Tenant "${t.name}" from the backup was skipped because some of its groups already belong to another tenant`)
+              }
             } else {
               replaceAccountDbFile(phone, tmpPath)
               details.push(`Data for +${phone} restored`)
