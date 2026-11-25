@@ -107,6 +107,7 @@ export function createQaAnswerHandler(deps: QaResponderDeps): JobHandler {
     messages.push({ role: 'user', text: firstTurn })
     const { output } = await runAiAnswer({
       job, provider, settings, system, messages, historyTurns, scope, spec: QA_ANSWER_SPEC, now,
+      toolValues: values,
       round1Request: { question, contextChars },
       accept: a => !!a.output?.trim(),
     })

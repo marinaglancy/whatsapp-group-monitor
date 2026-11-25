@@ -48,6 +48,7 @@ function options(
     job, provider, settings: SETTINGS,
     system: 'SYSTEM', messages: [{ role: 'user', text: 'Is this spam?' }], historyTurns: 0,
     scope, spec: TEST_SPEC, now: () => NOW_MS,
+    toolValues: { timezone: 'Europe/Lisbon' },
     round1Request: { message: 'Is this spam?' },
     accept: a => !!a.verdict,
     ...extra,
@@ -65,6 +66,9 @@ describe('runAiAnswer', () => {
     expect(result).toEqual({ error: false, verdict: 'spam' })
     expect(provider.calls[0].system).toBe('SYSTEM')
     expect(provider.calls[0].tools.length).toBeGreaterThan(0)
+    // the given placeholder values reach the tool declarations
+    expect(JSON.stringify(provider.calls[0].tools)).toContain('Europe/Lisbon')
+    expect(JSON.stringify(provider.calls[0].tools)).not.toContain('{{')
     // the tool result is handed back on the next round
     expect(provider.calls[1].messages.some(m => m.role === 'tool' && m.name === 'group_list')).toBe(true)
     const events = getJobEvents(job.id)

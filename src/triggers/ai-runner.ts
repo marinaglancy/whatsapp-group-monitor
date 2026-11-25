@@ -35,6 +35,8 @@ export interface AiRunOptions<T extends AiAnswerBase> {
   scope: QaScope
   spec: AnswerSpec<T>
   now: () => number
+  /** Values for the {{placeholders}} in the tool declarations. */
+  toolValues: Record<string, string>
   /** Extra fields logged on round 1's ai_call event. */
   round1Request: Record<string, unknown>
   /** Whether a valid answer is usable; false is treated like an invalid answer. */
@@ -47,8 +49,7 @@ export interface AiRunOptions<T extends AiAnswerBase> {
  *  last round has no usable answer, or when the daily limit is reached. */
 export async function runAiAnswer<T extends AiAnswerBase>(o: AiRunOptions<T>): Promise<T> {
   const { job, provider, settings, system, messages, historyTurns, scope, spec, now } = o
-  // the declarations only use {{timezone}}
-  const tools = loadToolDeclarations({ timezone: settings.timezone })
+  const tools = loadToolDeclarations(o.toolValues)
   const deadline = now() + AI_JOB_TIMEOUT_MS
   let invalidOnToolRound = false
 
