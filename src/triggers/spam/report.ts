@@ -1,11 +1,10 @@
-/** The text used to tell whether two messages are "the same": trimmed, whitespace collapsed. */
-export function normalizeText(t: string): string {
-  return t.trim().replace(/\s+/g, ' ')
-}
+import { bareId } from '../../utils/text.js'
+
+export { normalizeText } from '../../utils/text.js'
 
 /** `123@lid` -> `@123`; `120363@g.us` -> `@120363` (the sender turns these into tappable mentions). */
 function mention(jid: string): string {
-  return '@' + jid.split('@')[0]
+  return '@' + bareId(jid)
 }
 
 function groupSection(title: string, groups: string[]): string | null {

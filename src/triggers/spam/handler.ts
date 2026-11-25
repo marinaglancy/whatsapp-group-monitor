@@ -21,6 +21,7 @@ import { getTrigger } from '../../db/queries/triggers.js'
 import { addJobEvent, hasJobEvent } from '../../db/queries/jobs.js'
 import { mediaIndication, qUsersByJids } from '../../db/queries/group-tools.js'
 import { formatDateTime } from '../../utils/time.js'
+import { bareId } from '../../utils/text.js'
 import { logger } from '../../utils/logger.js'
 
 /** Spam errors go to the notification group at most this often per trigger. */
@@ -64,10 +65,6 @@ interface CheckedMessage {
 }
 
 type Copy = { groupJid: string; messageId: string; timestamp: number }
-
-function bareId(jid: string): string {
-  return jid.split(':')[0].split('@')[0]
-}
 
 function unique(items: string[]): string[] {
   return [...new Set(items)]

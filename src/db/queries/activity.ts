@@ -2,7 +2,7 @@ import { eq, and, desc, sql, gte, lt, inArray } from 'drizzle-orm'
 import { getAccountDb } from '../account.js'
 import { groupActivityLog } from '../schema.js'
 import type { ActivityRecord } from '../../whatsapp/activity/record.js'
-import { normalizeText } from '../../triggers/spam/report.js'
+import { normalizeText } from '../../utils/text.js'
 
 /** Insert activity record. Returns true if inserted, false if duplicate. */
 export function insertActivity(record: ActivityRecord): boolean {

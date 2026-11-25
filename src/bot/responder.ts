@@ -16,6 +16,7 @@ import { getTenantIdForGroup } from '../db/queries/tenants.js'
 import { getTrigger } from '../db/queries/triggers.js'
 import { qUsersByJids } from '../db/queries/group-tools.js'
 import { formatDateTime } from '../utils/time.js'
+import { bareId } from '../utils/text.js'
 import type { JobHandler } from './worker.js'
 import { logger } from '../utils/logger.js'
 
@@ -37,10 +38,6 @@ export interface QaResponderDeps {
   sendReply: (job: BotJob, text: string) => Promise<string | null>
   setComposing?: (groupJid: string) => Promise<void>
   nowMs?: () => number // injectable clock for tests
-}
-
-function bareId(jid: string): string {
-  return jid.split(':')[0].split('@')[0]
 }
 
 /** The trigger that created the job; null when it was deleted since, or the

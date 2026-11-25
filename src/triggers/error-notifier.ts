@@ -5,6 +5,7 @@ import { addJobEvent, hasJobEvent } from '../db/queries/jobs.js'
 import { getTriggerType } from './registry.js'
 import { TriggerGoneError, errorTextFor, renderErrorTemplate } from './errors.js'
 import type { BaseTriggerConfig } from './types.js'
+import { bareId } from '../utils/text.js'
 import { logger } from '../utils/logger.js'
 
 /** Longest message text put into the error template's {{message}}. */
@@ -25,10 +26,6 @@ const lastPostAt = new Map<number, number>()
 /** Tests only: forget all error posts. */
 export function resetErrorThrottleForTests(): void {
   lastPostAt.clear()
-}
-
-function bareId(jid: string): string {
-  return jid.split(':')[0].split('@')[0]
 }
 
 /** onFailure notifier for the worker: posts the trigger's error template to
