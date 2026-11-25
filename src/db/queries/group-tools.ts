@@ -123,7 +123,9 @@ export function qGroupMembers(ctx: QaToolQueryCtx, opts: {
       SELECT gm.user_jid,
              max(CASE gm.membership WHEN 'superadmin' THEN 5 WHEN 'admin' THEN 4 WHEN 'participant' THEN 3 WHEN 'pending_approval' THEN 2 ELSE 1 END) AS lvl,
              group_concat(CASE WHEN gm.membership NOT IN ('none') THEN gm.group_jid END) AS grps,
-             min(gm.joined_at) AS joined_at,
+             CASE WHEN count(CASE WHEN gm.membership NOT IN ('none') THEN 1 END) > 0
+                  THEN min(CASE WHEN gm.membership NOT IN ('none') THEN gm.joined_at END)
+                  ELSE min(gm.joined_at) END AS joined_at,
              max(gm.left_at) AS left_at,
              max(gm.last_read_at) AS last_read
       FROM group_members gm

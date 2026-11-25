@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedUser, seedMember, seedMessage } from '../helpers/fixtures.js'
+import { sql } from 'drizzle-orm'
+import { getAccountDb } from '../../src/db/account.js'
 import { qGroupMembers, qGroupMessages, qActivityStats, qSearchMessages } from '../../src/db/queries/group-tools.js'
 
 const ANNA = 'anna@lid'
@@ -262,5 +264,54 @@ describe('qSearchMessages', () => {
     const { hits } = qSearchMessages({ groupJids: AB }, { query: ['chatter'], authorLid: ANNA, from: 0, to: 100_000, order: 'desc', limit: 20, offset: 0 })
     expect(hits.map(h => h.messageId)).toEqual(['B1'])
     expect(qSearchMessages({ groupJids: AB }, { query: ['chatter'], from: 0, to: 8000, order: 'desc', limit: 20, offset: 0 }).total).toBe(0)
+  })
+})
+
+describe('qGroupMembers joined_at', () => {
+  const base = { fields: new Set<string>(['joined_at', 'groups']), activityFrom: 0, activityTo: 10_000, filters: {}, includeLeft: true, orderBy: 'lid', order: 'asc' as const, limit: 50, offset: 0 }
+  const EVE = 'eve@lid'
+  const FRED = 'fred@lid'
+  const GINA = 'gina@lid'
+  const set = (g: string, u: string, membership: string, joinedAt: number | null) =>
+    getAccountDb().run(sql`UPDATE group_members SET membership = ${membership}, joined_at = ${joinedAt} WHERE group_jid = ${g} AND user_jid = ${u}`)
+  const get = (lid: string, opts = base) => qGroupMembers({ groupJids: AB }, opts).members.find(m => m.lid === lid)!
+
+  it('ignores the join date of a group the person has left (long-time member of A, briefly in B)', () => {
+    seedMember('a@g.us', EVE)
+    seedMember('b@g.us', EVE)
+    set('a@g.us', EVE, 'participant', null)
+    set('b@g.us', EVE, 'none', 900_000)
+    const eve = get(EVE)
+    expect(eve.groups).toEqual(['a@g.us'])
+    expect(eve.joinedAt).toBeNull()
+  })
+
+  it('uses the earliest join among the groups the person is still in', () => {
+    seedMember('a@g.us', FRED)
+    seedMember('b@g.us', FRED)
+    set('a@g.us', FRED, 'participant', 5_000_000)
+    set('b@g.us', FRED, 'admin', 2_000_000)
+    expect(get(FRED).joinedAt).toBe(2000)
+  })
+
+  it('uses the earliest recorded join for a former member', () => {
+    seedMember('a@g.us', GINA)
+    seedMember('b@g.us', GINA)
+    set('a@g.us', GINA, 'none', 5_000_000)
+    set('b@g.us', GINA, 'none', 3_000_000)
+    const gina = get(GINA)
+    expect(gina.role).toBe('none')
+    expect(gina.joinedAt).toBe(3000)
+  })
+
+  it('orders by the same value', () => {
+    seedMember('a@g.us', EVE); seedMember('b@g.us', EVE)
+    seedMember('a@g.us', FRED); seedMember('b@g.us', FRED)
+    set('a@g.us', EVE, 'participant', 8_000_000)
+    set('b@g.us', EVE, 'none', 1_000_000) // left B: must not count, EVE sorts by 8000
+    set('a@g.us', FRED, 'participant', 9_000_000)
+    set('b@g.us', FRED, 'participant', 4_000_000) // FRED sorts by 4000
+    const ids = qGroupMembers({ groupJids: AB }, { ...base, filters: { lids: [EVE, FRED] }, orderBy: 'joined_at', order: 'asc' }).members.map(m => m.lid)
+    expect(ids).toEqual([FRED, EVE])
   })
 })

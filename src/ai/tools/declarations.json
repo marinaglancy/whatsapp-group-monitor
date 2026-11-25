@@ -267,7 +267,8 @@
                 "description": "Activities in the window."
               },
               "joined_at": {
-                "type": "string"
+                "type": "string",
+                "description": "When the member joined, as recorded by the monitor: the earliest join date among the searched groups they are still in (for a former member: among the groups they left). Absent when unknown — members who were already there when monitoring started have no join date."
               },
               "left_at": {
                 "type": "string",
