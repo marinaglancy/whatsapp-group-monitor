@@ -13,3 +13,14 @@ function droppedGroupsNote(count) {
     ? '1 group is no longer in this tenant and was removed from the list'
     : count + ' groups are no longer in this tenant and were removed from the list';
 }
+
+// The watched-groups selection of a Spam form: the saved groups still in the tenant,
+// and the note markup (only when groups are used and some were dropped)
+function watchedGroupsState(cfg, groups) {
+  const split = splitTenantGroups(cfg.groupJids, groups);
+  const note = cfg.groupsMode === 'all' ? '' : droppedGroupsNote(split.droppedCount);
+  return {
+    picked: split.kept,
+    noteHtml: note ? '<div class="muted" id="s-dropped-note" style="margin:.3rem 0">' + note + '</div>' : '',
+  };
+}

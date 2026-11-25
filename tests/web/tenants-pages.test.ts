@@ -60,10 +60,23 @@ describe('tenants pages', () => {
     expect(note(2)).toBe('2 groups are no longer in this tenant and were removed from the list')
   })
 
-  it('the trigger page loads the helpers and shows the dropped-groups note', async () => {
+  it('builds the watched-groups selection and note for a form with stale groups', () => {
+    const ctx: Record<string, unknown> = {}
+    vm.runInNewContext(readFileSync('src/web/static/trigger-helpers.js', 'utf-8') + ';this.state = watchedGroupsState', ctx)
+    const state = ctx.state as (c: object, g: { jid: string }[]) => { picked: string[]; noteHtml: string }
+    const groups = [{ jid: 'a@g.us' }]
+    const two = state({ groupsMode: 'only', groupJids: ['a@g.us', 'x@g.us', 'y@g.us'] }, groups)
+    expect(two.picked).toEqual(['a@g.us'])
+    expect(two.noteHtml).toContain('2 groups are no longer in this tenant and were removed from the list')
+    expect(two.noteHtml).not.toContain('class="error"')
+    expect(state({ groupsMode: 'except', groupJids: ['x@g.us'] }, groups).noteHtml).toContain('1 group is no longer in this tenant')
+    expect(state({ groupsMode: 'all', groupJids: ['x@g.us'] }, groups)).toEqual({ picked: [], noteHtml: '' })
+    expect(state({ groupsMode: 'only', groupJids: ['a@g.us'] }, groups).noteHtml).toBe('')
+  })
+
+  it('the trigger page loads the helpers file, which is served', async () => {
     const res = await app.inject({ method: 'GET', url: '/tenants/1/triggers/new?type=spam', headers: { cookie: auth.cookie } })
     expect(res.body).toContain('src="/static/trigger-helpers.js"')
-    expect(res.body).toContain('id="s-dropped-note"')
     expect((await app.inject({ method: 'GET', url: '/static/trigger-helpers.js' })).statusCode).toBe(200)
   })
 

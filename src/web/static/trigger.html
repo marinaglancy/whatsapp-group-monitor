@@ -137,9 +137,8 @@
 
     function spamForm(cfg, type, groups, groupNames) {
       spamCovered = groups;
-      const split = splitTenantGroups(cfg.groupJids, groups);
-      spamPicked = new Set(split.kept);
-      const droppedNote = droppedGroupsNote(split.droppedCount);
+      const watched = watchedGroupsState(cfg, groups);
+      spamPicked = new Set(watched.picked);
       const chk = (id, on, label) => '<label><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '> ' + label + '</label>';
       const radio = (name, value, cur, label) => '<label><input type="radio" name="' + name + '" value="' + value + '"' + (cur === value ? ' checked' : '') + '> ' + label + '</label>';
       let reportOptions = groups.map(g => '<option value="' + esc(g.jid) + '"' + (g.jid === cfg.reportGroupJid ? ' selected' : '') + '>'
@@ -155,7 +154,7 @@
         + '<div class="row">' + radio('s-mode', 'all', cfg.groupsMode, 'All groups of this tenant')
         + radio('s-mode', 'only', cfg.groupsMode, 'Only the selected groups')
         + radio('s-mode', 'except', cfg.groupsMode, 'All groups except the selected ones') + '</div>'
-        + (droppedNote ? '<div class="error" id="s-dropped-note">' + esc(droppedNote) + '</div>' : '')
+        + watched.noteHtml
         + '<div class="row" id="s-pick-row"><button type="button" class="btn" id="s-pick">Choose groups...</button><span class="muted" id="s-pick-count"></span></div>'
         + '<div class="row"><span>Bot role in the group:</span>'
         + '<select id="s-bot-role"><option value="any">Any</option><option value="admin">Admin</option><option value="not_admin">Not an admin</option></select>'
