@@ -53,4 +53,16 @@ describe.skipIf(!KEY)('gemini live', () => {
     if (resp.toolCalls?.length) expect(resp.toolCalls[0].name).toBe('get_time')
     else expect(parseAiAnswer(resp.text, QA_ANSWER_SPEC)).not.toBeNull()
   }, 30_000)
+
+  // What every final round sends: no tools, JSON mode with the answer schema.
+  it('answers in JSON mode with an empty tools list and the answer schema', async () => {
+    const provider = createGeminiProvider({ apiKey: KEY!, model: DEFAULT_GEMINI_MODEL })
+    const resp = await provider.generate({
+      system: `You answer short questions.\n${QA_ANSWER_SPEC.formatSection}`,
+      messages: [{ role: 'user', text: 'What is the capital of France?' }],
+      tools: [],
+      responseSchema: QA_ANSWER_SPEC.modelSchema,
+    })
+    expect(parseAiAnswer(resp.text, QA_ANSWER_SPEC)).not.toBeNull()
+  }, 30_000)
 })

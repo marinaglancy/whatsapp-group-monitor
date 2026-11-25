@@ -22,14 +22,14 @@ export function buildAnswerSpec<T extends AiAnswerBase>(
   okProps: Record<string, Record<string, unknown>>,
   formatSection: string,
 ): AnswerSpec<T> {
-  const modelSchema = {
-    type: 'object',
-    properties: { error: { type: 'boolean' }, errormessage: { type: 'string' }, ...okProps },
-    required: ['error'],
-  }
-  // When error is false, every extra field is required.
+  const properties = { error: { type: 'boolean' }, errormessage: { type: 'string' }, ...okProps }
+  // The model must always send the extra fields, so JSON mode cannot return {"error":false} alone.
+  const modelSchema = { type: 'object', properties, required: ['error', ...Object.keys(okProps)] }
+  // Our own check is looser: the extra fields are only required when error is false.
   const checkSchema = {
-    ...modelSchema,
+    type: 'object',
+    properties,
+    required: ['error'],
     if: { properties: { error: { const: false } } },
     then: { required: Object.keys(okProps) },
   }
