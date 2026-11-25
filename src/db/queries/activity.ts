@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, gte, inArray } from 'drizzle-orm'
+import { eq, and, desc, sql, gte, lt, inArray } from 'drizzle-orm'
 import { getAccountDb } from '../account.js'
 import { groupActivityLog } from '../schema.js'
 import type { ActivityRecord } from '../../whatsapp/activity/record.js'
@@ -141,4 +141,19 @@ export function getGroupUserActivity(groupJid: string, sinceDays: number) {
     .groupBy(groupActivityLog.userJid)
     .orderBy(desc(sql`total`))
     .all()
+}
+
+/** How many messages this user posted in the group before the given time (unix seconds). */
+export function countUserMessagesBefore(groupJid: string, userJid: string, beforeTs: number): number {
+  const db = getAccountDb()
+  const row = db.select({ cnt: sql<number>`count(*)` })
+    .from(groupActivityLog)
+    .where(and(
+      eq(groupActivityLog.groupJid, groupJid),
+      eq(groupActivityLog.userJid, userJid),
+      eq(groupActivityLog.eventType, 'message'),
+      lt(groupActivityLog.timestamp, beforeTs),
+    ))
+    .get()
+  return row?.cnt ?? 0
 }

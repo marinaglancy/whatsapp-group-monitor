@@ -2,6 +2,8 @@ import { getAccountDb } from '../../src/db/account.js'
 import { createTrigger } from '../../src/db/queries/triggers.js'
 import { QA_TRIGGER_DEFAULTS } from '../../src/triggers/qa/defaults.js'
 import type { QaTriggerConfig } from '../../src/triggers/qa/type.js'
+import { SPAM_TRIGGER_DEFAULTS } from '../../src/triggers/spam/defaults.js'
+import type { SpamTriggerConfig } from '../../src/triggers/spam/type.js'
 import { createTenant, setTenantGroups } from '../../src/db/queries/tenants.js'
 import { groups, users, groupMembers, groupActivityLog, type ActivityEventType, type Group, type GroupBotConfig, membershipLevels } from '../../src/db/schema.js'
 
@@ -71,5 +73,17 @@ export function seedQaTrigger(tenantId: number, qaGroupJid: string, opts: {
     name: opts.name ?? 'Questions',
     enabled: opts.enabled,
     config: { ...QA_TRIGGER_DEFAULTS, qaGroupJid, ...opts.config },
+  })
+}
+
+export function seedSpamTrigger(tenantId: number, reportGroupJid: string, opts: {
+  config?: Partial<SpamTriggerConfig>; enabled?: boolean; name?: string
+} = {}): number {
+  return createTrigger({
+    tenantId,
+    type: 'spam',
+    name: opts.name ?? 'Spam',
+    enabled: opts.enabled,
+    config: { ...SPAM_TRIGGER_DEFAULTS, reportGroupJid, ...opts.config },
   })
 }

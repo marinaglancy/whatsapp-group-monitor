@@ -257,3 +257,13 @@ export function getGroupMemberCounts(groupJids: string[]): Map<string, number> {
   }
   return result
 }
+
+/** One member's current membership level and join date (null when the join was never observed), or null when unknown. */
+export function getMembership(groupJid: string, userJid: string): { membership: MembershipLevel; joinedAt: Date | null } | null {
+  const db = getAccountDb()
+  const row = db.select({ membership: groupMembers.membership, joinedAt: groupMembers.joinedAt })
+    .from(groupMembers)
+    .where(and(eq(groupMembers.groupJid, groupJid), eq(groupMembers.userJid, userJid)))
+    .get()
+  return row ?? null
+}

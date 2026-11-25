@@ -111,7 +111,7 @@ describe('tenants api', () => {
       id: trig, name: 'Questions', type: 'qa', typeName: 'Mentions', enabled: true,
       summary: 'Q&A group: Kid2 · wait 5 s', warning: 'The Q&A group is not in this tenant',
     }])
-    expect(body.triggerTypes).toEqual([{ id: 'qa', displayName: 'Mentions' }])
+    expect(body.triggerTypes).toEqual([{ id: 'qa', displayName: 'Mentions' }, { id: 'spam', displayName: 'Spam' }])
     expect((await call('GET', '/api/tenants/9999')).statusCode).toBe(404)
   })
 
