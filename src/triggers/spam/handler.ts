@@ -305,6 +305,8 @@ function buildFirstTurn(input: JudgeInput, settings: AiSettings, sender: { name:
     `Group: ${groupLabel(scope, msg.groupJid)}`,
     `Posted at: ${formatDateTime(msg.timestamp, settings.timezone)}`,
     `Type: ${msg.media ? singleLine(msg.media) : 'text'}`,
+    // the AI only gets the type: without this it may describe a picture it never saw
+    ...(msg.media ? ['You cannot see the attachment itself, only its type and caption. Do not guess what it shows.'] : []),
     msg.textKey ? 'Text: at the end, between markers' : 'Text: none',
     '',
     'The sender:',

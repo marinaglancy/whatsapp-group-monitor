@@ -323,6 +323,7 @@ describe('spam_check handler: what the AI is given', () => {
     expect(turn.text).toContain('Group: "Alpha" (a@g.us)')
     expect(turn.text).toMatch(/Posted at: \d{4}-\d\d-\d\d \d\d:\d\d:\d\d/)
     expect(turn.text).toContain('Type: text')
+    expect(turn.text).not.toContain('You cannot see the attachment')
     expect(turn.text).toContain('Name: Spammy')
     expect(turn.text).toContain('Phone: 4915550001')
     expect(turn.text).toContain('Id: spammer@lid')
@@ -430,7 +431,7 @@ describe('spam_check handler: what the AI is given', () => {
     const provider = fakeProvider([verdict(false, false)])
     await makeHandler(provider)(copyJob('a@g.us', '', 'imageMessage'))
     const turn = provider.calls[0].messages[0] as { text: string }
-    expect(turn.text).toContain('Type: image')
+    expect(turn.text).toContain('Type: image\nYou cannot see the attachment itself, only its type and caption. Do not guess what it shows.\n')
     expect(turn.text).toContain('Text: none')
     expect(turn.text).not.toContain('start of the message text')
   })
