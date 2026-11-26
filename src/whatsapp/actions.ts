@@ -1,9 +1,12 @@
-import { generateMessageID, generateWAMessageFromContent, proto } from 'baileys'
+import { generateMessageID, generateWAMessageFromContent, jidNormalizedUser, proto } from 'baileys'
 import { ActivityRecord } from './activity/record.js'
 import { getSock } from './client.js'
+import { getBotJids } from './handlers/connection.js'
 import { registerSentMessage } from '../bot/sent-registry.js'
-import { getAllGroups } from '../db/queries/groups.js'
+import { getAllGroups, getGroup } from '../db/queries/groups.js'
 import { qFindUserJid } from '../db/queries/group-tools.js'
+import { getMembership, getUserGroupMemberships } from '../db/queries/members.js'
+import { isMessageDeleted } from '../db/queries/activity.js'
 
 /** Whether an edited message keeps its group mentions tappable. Not yet
  *  checked live; set it to false if they do not survive an edit, and callers
@@ -78,8 +81,10 @@ function groupMentionEnvelope(message: unknown): proto.IMessage {
   return { groupMentionedMessage: { message } } as never
 }
 
-/** relayMessage has no self-echo through messages.upsert, so a message sent
- *  that way records its own activity row. */
+/** Record the activity row of a message the bot sent. relayMessage has no
+ *  self-echo through messages.upsert, so a message sent that way needs this.
+ *  A delete sent through sendMessage uses it too, to be seen at once; its
+ *  later echo has the same message id and is dropped as a duplicate. */
 function recordOwnMessage(groupJid: string, msg: { key: proto.IMessageKey; message?: proto.IMessage | null }): void {
   ActivityRecord.fromMessage(
     { ...msg, messageTimestamp: Math.floor(Date.now() / 1000) } as never,
@@ -154,4 +159,90 @@ export async function editGroupMessage(groupJid: string, messageId: string, text
   }
 
   await sock.sendMessage(groupJid, { text, ...(mentions.length ? { mentions } : {}), edit: key })
+}
+
+/** The outcome of deleting a message or removing a user. Refusals never ask
+ *  WhatsApp: not_admin = the bot is not an admin there (or the group or
+ *  community is unknown), is_admin = the user is an admin there,
+ *  is_bot = the user is the bot itself. */
+export type ActionResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_admin' | 'is_admin' | 'is_bot' | 'failed'; detail?: string }
+
+function isAdminLevel(membership: string | null | undefined): boolean {
+  return membership === 'admin' || membership === 'superadmin'
+}
+
+/** From the stored group row (kept in sync by group events). */
+function botIsAdminOf(jid: string): boolean {
+  return isAdminLevel(getGroup(jid)?.botMembership)
+}
+
+function isBot(userJid: string): boolean {
+  return getBotJids().includes(jidNormalizedUser(userJid))
+}
+
+function failed(err: unknown): ActionResult {
+  return { ok: false, reason: 'failed', detail: err instanceof Error ? err.message : String(err) }
+}
+
+/** Run a remove call for one participant and read WhatsApp's status for them. */
+async function removeParticipant(call: () => Promise<{ status: string }[]>): Promise<ActionResult> {
+  try {
+    const [result] = await call()
+    // 404: not a participant, so the user is already gone
+    if (result?.status === '200' || result?.status === '404') return { ok: true }
+    return { ok: false, reason: 'failed', detail: result?.status ?? 'no result' }
+  } catch (err) {
+    return failed(err)
+  }
+}
+
+/** Delete a member's message as a group admin. senderJid goes into the key as
+ *  the message's participant: pass the author as stored on the message's
+ *  activity row (the original key's participant). Records the `delete`
+ *  activity row (user = the bot) at once, so isMessageDeleted sees it. */
+export async function deleteMemberMessage(groupJid: string, messageId: string, senderJid: string): Promise<ActionResult> {
+  if (isMessageDeleted(groupJid, messageId)) return { ok: true }
+  if (!botIsAdminOf(groupJid)) return { ok: false, reason: 'not_admin' }
+  const key = { remoteJid: groupJid, fromMe: false, id: messageId, participant: senderJid }
+  // Pre-generated: the row recorded below and Baileys' echo of the delete
+  // (messages.upsert, which can come first) share this id, so one is a duplicate.
+  const deleteId = generateMessageID()
+  try {
+    await getSock().sendMessage(groupJid, { delete: key }, { messageId: deleteId })
+  } catch (err) {
+    return failed(err)
+  }
+  recordOwnMessage(groupJid, {
+    key: { remoteJid: groupJid, fromMe: true, id: deleteId },
+    message: { protocolMessage: { key, type: proto.Message.ProtocolMessage.Type.REVOKE } },
+  })
+  return { ok: true }
+}
+
+/** Remove a user from one group. Never the bot or an admin of the group; a
+ *  user who already left (stored membership 'none') counts as done. */
+export async function removeFromGroup(groupJid: string, userJid: string): Promise<ActionResult> {
+  if (isBot(userJid)) return { ok: false, reason: 'is_bot' }
+  const membership = getMembership(groupJid, userJid)?.membership
+  if (isAdminLevel(membership)) return { ok: false, reason: 'is_admin' }
+  if (membership === 'none') return { ok: true }
+  if (!botIsAdminOf(groupJid)) return { ok: false, reason: 'not_admin' }
+  return removeParticipant(() => getSock().groupParticipantsUpdate(groupJid, [userJid], 'remove'))
+}
+
+/** Remove a user from a community, which removes them from all its groups.
+ *  Never the bot, nor an admin of the community or of any of its known
+ *  groups. WhatsApp lists only admins in a community's own roster, so its
+ *  row alone cannot tell that a member left: the user counts as already gone
+ *  only when every stored membership in the community and its groups is 'none'. */
+export async function removeFromCommunity(communityJid: string, userJid: string): Promise<ActionResult> {
+  if (isBot(userJid)) return { ok: false, reason: 'is_bot' }
+  const memberships = getUserGroupMemberships(userJid)
+    .filter(m => m.groupJid === communityJid || m.parentCommunityJid === communityJid)
+  if (memberships.some(m => isAdminLevel(m.membership))) return { ok: false, reason: 'is_admin' }
+  if (memberships.length && memberships.every(m => m.membership === 'none')) return { ok: true }
+  if (!botIsAdminOf(communityJid)) return { ok: false, reason: 'not_admin' }
+  return removeParticipant(() => getSock().communityParticipantsUpdate(communityJid, [userJid], 'remove'))
 }
