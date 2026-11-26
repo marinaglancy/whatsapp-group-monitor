@@ -163,7 +163,7 @@
         + '<div>' + chk('s-content', cfg.contentEnabled, 'The message content matches') + ' <span class="muted">(any one of these is enough)</span>'
         + '<div style="margin-left:1.4rem">'
         + '<div>' + chk('s-link', cfg.contentLink, 'It has a link') + '</div>'
-        + '<div>' + chk('s-image', cfg.contentImage, 'It has an image') + '</div>'
+        + '<div>' + chk('s-image', cfg.contentImage, 'It has an image') + ' <span class="muted">(the picture itself is not analysed yet, only its caption)</span></div>'
         + '<div>The text matches this pattern (regex): <input type="text" id="s-regex" style="width:220px" maxlength="200"></div>'
         + '</div></div>'
         + '<div>' + chk('s-not-admin', cfg.senderNotAdmin, 'The sender is not an admin') + '</div>'

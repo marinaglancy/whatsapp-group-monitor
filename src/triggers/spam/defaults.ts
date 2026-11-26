@@ -36,7 +36,7 @@ export const SPAM_TRIGGER_DEFAULTS: SpamTriggerConfig = {
   botRole: 'any',
   contentEnabled: true,
   contentLink: true,
-  contentImage: true,
+  contentImage: false,
   contentRegex: '',
   senderNotAdmin: true,
   joinedWithinDays: null,

@@ -188,7 +188,8 @@ Add it with **+ Add trigger** and choose **Spam**. The settings:
   or not an admin), checked when the message arrives.
 - **Conditions**: a message is only checked if all the ticked conditions are true.
   - **The message content matches**: it has a link, it has an image, or its text matches a
-    pattern (a regular expression). Any one of these is enough. Defaults: link and image.
+    pattern (a regular expression). Any one of these is enough. Default: link only (pictures
+    are not analysed yet, see below).
   - **The sender is not an admin** (on by default).
   - **The sender joined less than N days ago** (off by default).
   - **The sender has fewer than N messages in this group** (off by default).
@@ -212,12 +213,12 @@ two questions: is the message **spam**, and is the sender a **spammer**. A long-
 who posts one ad is spam but not a spammer. If the AI says the message is not spam, nothing
 is posted.
 
-**Pictures are not analysed.** The "it has an image" condition only decides which messages
-are checked. The AI never sees the picture itself: it knows only that the message has an
-image, plus its caption, the sender and their other messages. So spam that is only in a
-picture (an ad without a caption) is usually not caught. Sending every picture to the AI
-was left out on purpose: many groups post lots of event photos, and that would quickly use
-up the AI budget.
+**Pictures are not analysed yet.** The "it has an image" condition (off by default) only
+decides which messages are checked. The AI never sees the picture itself: it knows only that
+the message has an image, plus its caption, the sender and their other messages. So spam
+that is only in a picture (an ad without a caption) is usually not caught. Sending every
+picture to the AI was left out on purpose: many groups post lots of event photos, and that
+would quickly use up the AI budget.
 
 **Deleting and removing** rules:
 

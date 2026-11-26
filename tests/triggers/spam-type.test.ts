@@ -97,9 +97,14 @@ describe('Spam trigger type', () => {
     expect(run(record())).toEqual([])
   })
 
-  it('fires for an image without text', () => {
-    seedSpamTrigger(tenantId, 'rep@g.us')
+  it('fires for an image without text when "it has an image" is ticked', () => {
+    seedSpamTrigger(tenantId, 'rep@g.us', { config: { contentImage: true } })
     expect(run(record({ metadata: { contentType: 'imageMessage' } }))).toHaveLength(1)
+  })
+
+  it('by default ignores an image without text (pictures are not analysed)', () => {
+    seedSpamTrigger(tenantId, 'rep@g.us')
+    expect(run(record({ metadata: { contentType: 'imageMessage' } }))).toHaveLength(0)
   })
 
   it('content off fires on every message; image unticked ignores images', () => {
@@ -236,7 +241,7 @@ describe('Spam trigger type', () => {
 
   it('normalize fills the defaults', () => {
     const c = spamTriggerType.normalize({ reportGroupJid: 'rep@g.us', waitSeconds: 3, junk: 1 })
-    expect(c).toMatchObject({ groupsMode: 'all', botRole: 'any', contentLink: true, contentImage: true, contentRegex: '',
+    expect(c).toMatchObject({ groupsMode: 'all', botRole: 'any', contentLink: true, contentImage: false, contentRegex: '',
       senderNotAdmin: true, joinedWithinDays: null, maxMessages: null, waitSeconds: 3, maxAgeMinutes: 60, onlyIfFirst: false })
     expect(c).not.toHaveProperty('junk')
   })
