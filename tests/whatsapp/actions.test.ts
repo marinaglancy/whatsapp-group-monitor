@@ -8,6 +8,8 @@ import { updateBotMembership } from '../../src/db/queries/groups.js'
 import { getAccountDb } from '../../src/db/account.js'
 import { groupActivityLog } from '../../src/db/schema.js'
 import { wasSentByBot } from '../../src/bot/sent-registry.js'
+import { ActivityRecord } from '../../src/whatsapp/activity/record.js'
+import { logger } from '../../src/utils/logger.js'
 
 const BOT_JID = '15550001234@s.whatsapp.net'
 const BOT_LID = '99887766001@lid'
@@ -82,7 +84,10 @@ beforeEach(() => {
   seedGroup(ALPHA, 'Alpha')
   seedUser('88112233445@lid', 'Zoe')
 })
-afterEach(() => { dbs.cleanup() })
+afterEach(() => {
+  vi.restoreAllMocks()
+  dbs.cleanup()
+})
 
 type Args = [string, Record<string, any>, Record<string, any>]
 
@@ -256,6 +261,15 @@ describe('deleteMemberMessage', () => {
     expect(isMessageDeleted(ALPHA, 'M1')).toBe(false)
   })
 
+  it('still reports success when WhatsApp deleted the message but recording the row fails', async () => {
+    updateBotMembership(ALPHA, 'admin')
+    vi.spyOn(ActivityRecord, 'fromMessage').mockImplementation(() => { throw new Error('disk full') })
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    expect(await deleteMemberMessage(ALPHA, 'M1', ZOE)).toEqual({ ok: true })
+    expect(fake.calls.length).toBe(1)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
   it('reports a failed delete with the error, and records nothing', async () => {
     updateBotMembership(ALPHA, 'admin')
     fake.failWith = new Error('forbidden')
@@ -285,6 +299,12 @@ describe('removeFromGroup', () => {
     seedMember(ALPHA, '55500000002@lid', 'superadmin')
     expect(await removeFromGroup(ALPHA, ZOE)).toEqual({ ok: false, reason: 'is_admin' })
     expect(await removeFromGroup(ALPHA, '55500000002@lid')).toEqual({ ok: false, reason: 'is_admin' })
+    expect(fake.calls).toEqual([])
+  })
+
+  it('finds an admin given an id with a device part', async () => {
+    seedMember(ALPHA, ZOE, 'admin')
+    expect(await removeFromGroup(ALPHA, '88112233445:3@lid')).toEqual({ ok: false, reason: 'is_admin' })
     expect(fake.calls).toEqual([])
   })
 
@@ -350,6 +370,12 @@ describe('removeFromCommunity', () => {
     expect(fake.calls).toEqual([])
   })
 
+  it('finds an admin given an id with a device part', async () => {
+    seedMember(CHILD, ZOE, 'admin')
+    expect(await removeFromCommunity(COMMUNITY, '88112233445:3@lid')).toEqual({ ok: false, reason: 'is_admin' })
+    expect(fake.calls).toEqual([])
+  })
+
   it('never removes the bot itself', async () => {
     expect(await removeFromCommunity(COMMUNITY, BOT_LID)).toEqual({ ok: false, reason: 'is_bot' })
     expect(fake.calls).toEqual([])
@@ -375,6 +401,17 @@ describe('removeFromCommunity', () => {
     seedMember(CHILD, ZOE)
     expect(await removeFromCommunity(COMMUNITY, ZOE)).toEqual({ ok: true })
     expect(fake.calls.length).toBe(1)
+  })
+
+  it('asks WhatsApp when only the community row is stored, even as gone', async () => {
+    seedMember(COMMUNITY, ZOE, 'none')
+    expect(await removeFromCommunity(COMMUNITY, ZOE)).toEqual({ ok: true })
+    expect(fake.calls.map(c => c.kind)).toEqual(['communityParticipantsUpdate'])
+  })
+
+  it('asks WhatsApp when nothing is stored for the user', async () => {
+    expect(await removeFromCommunity(COMMUNITY, ZOE)).toEqual({ ok: true })
+    expect(fake.calls.map(c => c.kind)).toEqual(['communityParticipantsUpdate'])
   })
 
   it('counts "not a participant" (404) as done, any other status as failed', async () => {

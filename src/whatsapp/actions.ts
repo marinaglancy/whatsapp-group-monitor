@@ -7,6 +7,7 @@ import { getAllGroups, getGroup } from '../db/queries/groups.js'
 import { qFindUserJid } from '../db/queries/group-tools.js'
 import { getMembership, getUserGroupMemberships } from '../db/queries/members.js'
 import { isMessageDeleted } from '../db/queries/activity.js'
+import { logger } from '../utils/logger.js'
 
 /** Whether an edited message keeps its group mentions tappable. Not yet
  *  checked live; set it to false if they do not survive an edit, and callers
@@ -214,16 +215,22 @@ export async function deleteMemberMessage(groupJid: string, messageId: string, s
   } catch (err) {
     return failed(err)
   }
-  recordOwnMessage(groupJid, {
-    key: { remoteJid: groupJid, fromMe: true, id: deleteId },
-    message: { protocolMessage: { key, type: proto.Message.ProtocolMessage.Type.REVOKE } },
-  })
+  try {
+    recordOwnMessage(groupJid, {
+      key: { remoteJid: groupJid, fromMe: true, id: deleteId },
+      message: { protocolMessage: { key, type: proto.Message.ProtocolMessage.Type.REVOKE } },
+    })
+  } catch (err) {
+    // WhatsApp already deleted it; the echo may still record the row
+    logger.warn({ err, groupJid, messageId }, 'Could not record the delete of a member message')
+  }
   return { ok: true }
 }
 
 /** Remove a user from one group. Never the bot or an admin of the group; a
  *  user who already left (stored membership 'none') counts as done. */
 export async function removeFromGroup(groupJid: string, userJid: string): Promise<ActionResult> {
+  userJid = jidNormalizedUser(userJid)
   if (isBot(userJid)) return { ok: false, reason: 'is_bot' }
   const membership = getMembership(groupJid, userJid)?.membership
   if (isAdminLevel(membership)) return { ok: false, reason: 'is_admin' }
@@ -235,14 +242,17 @@ export async function removeFromGroup(groupJid: string, userJid: string): Promis
 /** Remove a user from a community, which removes them from all its groups.
  *  Never the bot, nor an admin of the community or of any of its known
  *  groups. WhatsApp lists only admins in a community's own roster, so its
- *  row alone cannot tell that a member left: the user counts as already gone
- *  only when every stored membership in the community and its groups is 'none'. */
+ *  row only tells whether they are an admin there: the user counts as
+ *  already gone only when they have rows in the community's groups and
+ *  every one is 'none'. */
 export async function removeFromCommunity(communityJid: string, userJid: string): Promise<ActionResult> {
+  userJid = jidNormalizedUser(userJid)
   if (isBot(userJid)) return { ok: false, reason: 'is_bot' }
   const memberships = getUserGroupMemberships(userJid)
     .filter(m => m.groupJid === communityJid || m.parentCommunityJid === communityJid)
   if (memberships.some(m => isAdminLevel(m.membership))) return { ok: false, reason: 'is_admin' }
-  if (memberships.length && memberships.every(m => m.membership === 'none')) return { ok: true }
+  const inGroups = memberships.filter(m => m.parentCommunityJid === communityJid)
+  if (inGroups.length && inGroups.every(m => m.membership === 'none')) return { ok: true }
   if (!botIsAdminOf(communityJid)) return { ok: false, reason: 'not_admin' }
   return removeParticipant(() => getSock().communityParticipantsUpdate(communityJid, [userJid], 'remove'))
 }
