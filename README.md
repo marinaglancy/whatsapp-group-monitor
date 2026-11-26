@@ -177,8 +177,9 @@ use a paid-tier API key. See Google's current Gemini API terms for details.
 ### Spam trigger
 
 The **Spam** trigger looks at new messages in the tenant's groups, asks the AI whether a
-message is spam, and reports what it finds to a group of your choice. **This version only
-reports.** It does not delete messages or remove users; that comes in a later version.
+message is spam, and reports what it finds to a group of your choice. It can also
+delete spam and remove spammers, but only when those actions are ticked. All actions are
+off by default, so out of the box it only reports.
 
 Add it with **+ Add trigger** and choose **Spam**. The settings:
 
@@ -197,6 +198,11 @@ Add it with **+ Add trigger** and choose **Spam**. The settings:
 - **Post reports and errors to**: the notification group. It must be one of the tenant's
   groups. Reports and error messages are posted there. Messages in this group are not
   checked.
+- **Actions**: all off by default.
+  - When the AI says it is spam from a spammer: "Delete all copies of the message in this
+    tenant's groups" and "Remove the user (from the community, or else from the groups)".
+  - When the AI says it is spam, but not from a spammer: "Delete the message". This deletes
+    only that one message. Each copy is deleted by its own check, and the report is updated.
 - **Prompt**, **Additional instructions** and **Error message** work as for Mentions. The
   default error message is `⚠️ Spam check failed for a message by {{user}} in {{group}}: {{error}}`.
 
@@ -206,6 +212,18 @@ two questions: is the message **spam**, and is the sender a **spammer**. A long-
 who posts one ad is spam but not a spammer. If the AI says the message is not spam, nothing
 is posted.
 
+**Deleting and removing** rules:
+
+- The bot can only delete messages or remove users in groups where it is an admin.
+- If the message's group is in a community where the bot is a community admin, the user is
+  removed from the community (all its groups at once). Otherwise the user is removed from
+  each group where a copy was found and the bot is an admin. Groups outside that community
+  are handled one by one. If removing from the community fails, the bot does not try its
+  groups one by one, and the report says so.
+- An admin of the group is never removed (for community removal: an admin of the community
+  or of any of its groups). The bot never removes itself.
+- A copy that is already deleted, or a user who is already removed, is simply skipped.
+
 **Reports** use `@` mentions, so users and groups are tappable. If the sender is a spammer:
 
 ```
@@ -213,7 +231,13 @@ Detected spam by user @<user>:
 
 *Not deleted!*
 - group @<group>
+
+*Deleted messages:*
 - group @<group>
+
+User removed from the community
+User removed from: @<group>, @<group>
+Could not remove the user from: @<group>
 
 *Message contents:*
 <text>
@@ -227,8 +251,15 @@ Suspicious message by user @<user>
 *Not deleted:*
 - group @<group>
 
+*Deleted:*
+- group @<group>
+
 <text>
 ```
+
+Sections appear only when they have something to show. The removal lines appear only when
+"Remove the user" is ticked. Instead of "User removed from the community" the report can say
+"User is not removed from the community".
 
 The same text from the same user is often posted in several groups. If the trigger already
 reported that user and text less than about 15 minutes ago (the time WhatsApp allows for
@@ -243,7 +274,7 @@ a new report is posted instead.
 Errors (for example the AI is busy or the daily limit is reached) are posted to the
 notification group at most once every 10 minutes per trigger; the rest only go to the job
 log. Every check is a `spam_check` job on the **Bot jobs** page, with the AI's verdict in
-its log. As with Mentions, the text of checked messages is sent to the Gemini API (see the
+its log. The job log also shows what was deleted or removed, and why something was not. As with Mentions, the text of checked messages is sent to the Gemini API (see the
 privacy note above).
 
 ## Environment Variables
