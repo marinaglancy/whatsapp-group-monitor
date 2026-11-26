@@ -195,6 +195,36 @@ async function removeParticipant(call: () => Promise<{ status: string }[]>): Pro
   }
 }
 
+/** Deletes go out like a person deleting one message after another: each
+ *  request waits until a random 0.5 to 1.2 seconds have passed since the
+ *  previous one. Only requests that reach WhatsApp count. */
+const DELETE_GAP_MIN_MS = 500
+const DELETE_GAP_MAX_MS = 1200
+
+interface DeletePacing { now(): number; random(): number; sleep(ms: number): Promise<void> }
+const realPacing: DeletePacing = {
+  now: () => Date.now(),
+  random: () => Math.random(),
+  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+}
+let pacing = realPacing
+let lastDeleteSentAt: number | null = null
+
+/** Tests replace the clock, the random number and the sleep; null restores the real ones. */
+export function setDeletePacingForTests(p: DeletePacing | null): void {
+  pacing = p ?? realPacing
+  lastDeleteSentAt = null
+}
+
+async function waitBeforeDelete(): Promise<void> {
+  if (lastDeleteSentAt !== null) {
+    const gap = DELETE_GAP_MIN_MS + pacing.random() * (DELETE_GAP_MAX_MS - DELETE_GAP_MIN_MS)
+    const wait = lastDeleteSentAt + gap - pacing.now()
+    if (wait > 0) await pacing.sleep(wait)
+  }
+  lastDeleteSentAt = pacing.now()
+}
+
 /** Delete a member's message as a group admin. senderJid goes into the key as
  *  the message's participant: pass the author as stored on the message's
  *  activity row (the original key's participant). Records the `delete`
@@ -206,6 +236,7 @@ export async function deleteMemberMessage(groupJid: string, messageId: string, s
   // Pre-generated: the row recorded below and Baileys' echo of the delete
   // (messages.upsert, which can come first) share this id, so one is a duplicate.
   const deleteId = generateMessageID()
+  await waitBeforeDelete()
   try {
     await getSock().sendMessage(groupJid, { delete: key }, { messageId: deleteId })
   } catch (err) {

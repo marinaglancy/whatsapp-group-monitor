@@ -63,6 +63,7 @@ vi.mock('../../src/whatsapp/client.js', async () => {
 
 import {
   postGroupMessage, editGroupMessage, deleteMemberMessage, removeFromGroup, removeFromCommunity,
+  setDeletePacingForTests,
 } from '../../src/whatsapp/actions.js'
 import { updateBotUser } from '../../src/whatsapp/handlers/connection.js'
 import { handleMessagesUpsert } from '../../src/whatsapp/handlers/activity.js'
@@ -73,8 +74,19 @@ const ZOE = '88112233445@lid'
 
 let dbs: ReturnType<typeof setupTestDbs>
 
+/** Delete pacing without real waiting: sleeping moves the fake clock. */
+const pace = { clock: 1_000_000, random: 0, sleeps: [] as { ms: number; callsBefore: number }[] }
+
 beforeEach(() => {
   dbs = setupTestDbs()
+  pace.clock = 1_000_000
+  pace.random = 0
+  pace.sleeps = []
+  setDeletePacingForTests({
+    now: () => pace.clock,
+    random: () => pace.random,
+    sleep: async (ms) => { pace.sleeps.push({ ms, callsBefore: fake.calls.length }); pace.clock += ms },
+  })
   fake.calls = []
   fake.participantStatus = '200'
   fake.failWith = null
@@ -86,6 +98,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   vi.restoreAllMocks()
+  setDeletePacingForTests(null)
   dbs.cleanup()
 })
 
@@ -268,6 +281,52 @@ describe('deleteMemberMessage', () => {
     expect(await deleteMemberMessage(ALPHA, 'M1', ZOE)).toEqual({ ok: true })
     expect(fake.calls.length).toBe(1)
     expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  describe('pacing, like a person deleting one message after another', () => {
+    const BETA = '120363000000000002@g.us'
+    beforeEach(() => {
+      seedGroup(BETA, 'Beta')
+      updateBotMembership(ALPHA, 'admin')
+      updateBotMembership(BETA, 'admin')
+      seedMessage(BETA, ZOE, 'Buy now!', 1_700_000_001, { messageId: 'M2' })
+      seedMessage(BETA, ZOE, 'Buy now!', 1_700_000_002, { messageId: 'M3' })
+    })
+
+    it('waits a random 0.5 to 1.2 seconds before each delete that follows another', async () => {
+      await deleteMemberMessage(ALPHA, 'M1', ZOE)
+      await deleteMemberMessage(BETA, 'M2', ZOE)
+      pace.random = 1
+      await deleteMemberMessage(BETA, 'M3', ZOE)
+      // the first delete goes out at once; each wait comes before its own request
+      expect(pace.sleeps).toEqual([{ ms: 500, callsBefore: 1 }, { ms: 1200, callsBefore: 2 }])
+      expect(fake.calls.length).toBe(3)
+    })
+
+    it('only waits for what is left of the gap, and not at all after a long pause', async () => {
+      await deleteMemberMessage(ALPHA, 'M1', ZOE)
+      pace.clock += 300
+      await deleteMemberMessage(BETA, 'M2', ZOE)
+      pace.clock += 5_000
+      await deleteMemberMessage(BETA, 'M3', ZOE)
+      expect(pace.sleeps.map(s => s.ms)).toEqual([200])
+    })
+
+    it('does not wait for, or count, a delete that never reaches WhatsApp', async () => {
+      await deleteMemberMessage(ALPHA, 'M1', ZOE)
+      await deleteMemberMessage(ALPHA, 'M1', ZOE) // already deleted
+      await deleteMemberMessage('unknown@g.us', 'M9', ZOE) // not an admin there
+      expect(pace.sleeps).toEqual([])
+      expect(fake.calls.length).toBe(1)
+    })
+
+    it('counts a failed request as sent', async () => {
+      fake.failWith = new Error('forbidden')
+      await deleteMemberMessage(ALPHA, 'M1', ZOE)
+      fake.failWith = null
+      await deleteMemberMessage(BETA, 'M2', ZOE)
+      expect(pace.sleeps.map(s => s.ms)).toEqual([500])
+    })
   })
 
   it('reports a failed delete with the error, and records nothing', async () => {
