@@ -16,6 +16,12 @@ export interface SpamTriggerConfig extends BaseTriggerConfig {
   joinedWithinDays: number | null
   maxMessages: number | null
   reportGroupJid: string
+  /** Spammer verdict: delete every copy found. */
+  deleteSpammerCopies: boolean
+  /** Spammer verdict: remove the user from the community, or else from the groups. */
+  removeSpammer: boolean
+  /** Spam, not a spammer: delete this message only. */
+  deleteSuspicious: boolean
   prompt: string
   instructions: string
 }
@@ -101,7 +107,10 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
     }
     if (c.groupsMode !== 'all' && c.groupJids.length === 0) return fail('Pick at least one group')
     if (!['any', 'admin', 'not_admin'].includes(c.botRole)) return fail('Invalid bot role')
-    for (const k of ['contentEnabled', 'contentLink', 'contentImage', 'senderNotAdmin', 'onlyIfFirst'] as const) {
+    for (const k of [
+      'contentEnabled', 'contentLink', 'contentImage', 'senderNotAdmin', 'onlyIfFirst',
+      'deleteSpammerCopies', 'removeSpammer', 'deleteSuspicious',
+    ] as const) {
       if (typeof c[k] !== 'boolean') return fail('Invalid setting: ' + k)
     }
     if (typeof c.contentRegex !== 'string') return fail('Invalid text pattern')
@@ -138,6 +147,9 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
     else if (config.botRole === 'not_admin') text += ' · non-admin groups only'
     if (config.onlyIfFirst) text += ' · only if no earlier trigger fired'
     if (config.waitSeconds > 0) text += ` · wait ${config.waitSeconds} s`
+    if (config.deleteSpammerCopies) text += ' · deletes spam'
+    if (config.removeSpammer) text += ' · removes spammers'
+    if (config.deleteSuspicious) text += ' · deletes suspicious messages'
     return text
   }
 

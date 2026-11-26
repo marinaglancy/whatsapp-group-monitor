@@ -16,6 +16,16 @@ function join(blocks: (string | null)[]): string {
   return blocks.filter((b): b is string => b !== null).join('\n\n')
 }
 
+/** The spammer report's removal block: one line for each thing that applies. */
+export function removalLines(s: { community?: 'removed' | 'not_removed'; removedFrom: string[]; notRemovedFrom: string[] }): string {
+  const lines: string[] = []
+  if (s.community === 'removed') lines.push('User removed from the community')
+  if (s.community === 'not_removed') lines.push('User is not removed from the community')
+  if (s.removedFrom.length) lines.push(`User removed from: ${s.removedFrom.map(mention).join(', ')}`)
+  if (s.notRemovedFrom.length) lines.push(`Could not remove the user from: ${s.notRemovedFrom.map(mention).join(', ')}`)
+  return lines.join('\n')
+}
+
 export function spammerReport(s: {
   userJid: string; contents: string; notDeleted: string[]; deleted: string[]; removal?: string
 }): string {

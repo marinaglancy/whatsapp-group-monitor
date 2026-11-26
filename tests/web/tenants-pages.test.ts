@@ -48,6 +48,26 @@ describe('tenants pages', () => {
     expect(res.body).toContain('Messages in this group are not checked.')
   })
 
+  it('the Spam form has the three actions under "Actions", after the notification group', async () => {
+    const res = await app.inject({ method: 'GET', url: '/tenants/1/triggers/new?type=spam', headers: { cookie: auth.cookie } })
+    const labels = [
+      'Post reports and errors to:',
+      'When the AI says it is spam from a spammer:',
+      "Delete all copies of the message in this tenant\\'s groups",
+      'Remove the user (from the community, or else from the groups)',
+      'When the AI says it is spam, but not from a spammer:',
+      'Delete the message',
+      'Error message (posted in the group above)',
+    ]
+    const at = labels.map(l => res.body.indexOf(l))
+    expect(at.every(i => i > 0)).toBe(true)
+    expect([...at].sort((x, y) => x - y)).toEqual(at)
+    for (const [id, key] of [['s-delete-copies', 'deleteSpammerCopies'], ['s-remove', 'removeSpammer'], ['s-delete-suspicious', 'deleteSuspicious']]) {
+      expect(res.body).toContain(`chk('${id}', cfg.${key}, `)
+      expect(res.body).toContain(`${key}: on('${id}')`)
+    }
+  })
+
   it('drops watched groups that left the tenant and words the note for one or many', () => {
     const ctx: Record<string, never> = {}
     vm.runInNewContext(readFileSync('src/web/static/trigger-helpers.js', 'utf-8') + ';this.split = splitTenantGroups; this.note = droppedGroupsNote', ctx)

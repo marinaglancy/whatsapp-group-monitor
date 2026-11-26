@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeText, spammerReport, suspiciousReport } from '../../src/triggers/spam/report.js'
+import { normalizeText, removalLines, spammerReport, suspiciousReport } from '../../src/triggers/spam/report.js'
 import { SPAM_ANSWER_SPEC } from '../../src/triggers/spam/answer.js'
 
 const U = '123@lid'
@@ -21,6 +21,18 @@ describe('spammerReport', () => {
   it('keeps line breaks in the contents', () => {
     expect(spammerReport({ userJid: U, contents: 'a\n\nb', notDeleted: ['1@g.us'], deleted: [] }))
       .toContain('*Message contents:*\na\n\nb')
+  })
+})
+
+describe('removalLines', () => {
+  it('has one line for each thing that applies, groups as mentions', () => {
+    expect(removalLines({ community: 'removed', removedFrom: ['1@g.us', '2@g.us'], notRemovedFrom: ['3@g.us'] }))
+      .toBe('User removed from the community\nUser removed from: @1, @2\nCould not remove the user from: @3')
+    expect(removalLines({ community: 'not_removed', removedFrom: [], notRemovedFrom: [] }))
+      .toBe('User is not removed from the community')
+    expect(removalLines({ removedFrom: [], notRemovedFrom: ['3@g.us', '4@g.us'] }))
+      .toBe('Could not remove the user from: @3, @4')
+    expect(removalLines({ removedFrom: [], notRemovedFrom: [] })).toBe('')
   })
 })
 

@@ -124,8 +124,17 @@ export const botJobs = sqliteTable('bot_jobs', {
 export type BotJob = typeof botJobs.$inferSelect
 
 export interface SpamVerdict { isspam?: boolean; isspammer?: boolean; reason?: string }
-/** Group jids of the copies seen so far, and what happened when removing the user. */
-export interface SpamCaseState { notDeleted: string[]; deleted: string[]; removal?: string }
+/** What a case's report lists, as group jids: where the copies were deleted
+ *  or not, where the user was removed or not, and the community removal
+ *  (absent when none was tried). Rows saved before the removal lists existed
+ *  lack them: findRecentCase and getCase fill them in. */
+export interface SpamCaseState {
+  notDeleted: string[]
+  deleted: string[]
+  removedFrom: string[]
+  notRemovedFrom: string[]
+  community?: 'removed' | 'not_removed'
+}
 
 /** One verdict per (trigger, user, normalized text); also remembers the report message to edit. */
 export const spamCases = sqliteTable('spam_cases', {

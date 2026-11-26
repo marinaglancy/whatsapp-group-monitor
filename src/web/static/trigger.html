@@ -184,7 +184,16 @@
         + '<div class="field"><label>Actions</label><div class="box"><div class="row">'
         + '<label for="s-report">Post reports and errors to:</label>'
         + '<select id="s-report" style="width:300px"><option value="">Choose a group...</option>' + reportOptions + '</select></div>'
-        + '<div class="muted">Messages in this group are not checked.</div></div></div>'
+        + '<div class="muted">Messages in this group are not checked.</div>'
+        + '<div style="margin-top:.7rem">When the AI says it is spam from a spammer:</div>'
+        + '<div style="margin-left:1.4rem">'
+        + '<div>' + chk('s-delete-copies', cfg.deleteSpammerCopies, 'Delete all copies of the message in this tenant\'s groups') + '</div>'
+        + '<div>' + chk('s-remove', cfg.removeSpammer, 'Remove the user (from the community, or else from the groups)') + '</div>'
+        + '</div>'
+        + '<div style="margin-top:.7rem">When the AI says it is spam, but not from a spammer:</div>'
+        + '<div style="margin-left:1.4rem">'
+        + '<div>' + chk('s-delete-suspicious', cfg.deleteSuspicious, 'Delete the message') + '</div>'
+        + '</div></div></div>'
         + '<div class="field"><label for="f-error">Error message (posted in the group above)</label>'
         + '<textarea id="f-error" rows="2" placeholder="Empty: ' + esc(type.defaultErrorTemplate) + '"></textarea>'
         + '<div class="muted" style="margin-top:.25rem">Placeholders: <code>{{error}}</code> <code>{{trigger}}</code> <code>{{group}}</code> <code>{{user}}</code> <code>{{message}}</code></div></div>';
@@ -243,6 +252,9 @@
         joinedWithinDays: on('s-joined-on') ? Number(val('s-joined')) : null,
         maxMessages: on('s-max-on') ? Number(val('s-max')) : null,
         reportGroupJid: val('s-report'),
+        deleteSpammerCopies: on('s-delete-copies'),
+        removeSpammer: on('s-remove'),
+        deleteSuspicious: on('s-delete-suspicious'),
         onlyIfFirst: on('f-only-first'),
         waitSeconds: Number(val('f-wait')),
         maxAgeMinutes: Number(val('f-age')),

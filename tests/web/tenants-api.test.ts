@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { FastifyInstance } from 'fastify'
 import { setupTestDbs } from '../helpers/db.js'
-import { seedGroup, seedTenant, seedQaTrigger } from '../helpers/fixtures.js'
+import { seedGroup, seedTenant, seedQaTrigger, seedSpamTrigger } from '../helpers/fixtures.js'
 import { buildTestApp, loginTestApp } from '../helpers/web.js'
 import { registerBuiltinTriggerTypes } from '../../src/triggers/index.js'
 import { clearTriggerTypesForTests } from '../../src/triggers/registry.js'
-import { listTriggers, getTrigger } from '../../src/db/queries/triggers.js'
+import { listTriggers, getTrigger, updateTrigger } from '../../src/db/queries/triggers.js'
 import { getAccountDb } from '../../src/db/account.js'
 import { tenantGroups } from '../../src/db/schema.js'
 import { getTenant } from '../../src/db/queries/tenants.js'
@@ -214,6 +214,32 @@ describe('tenants api', () => {
     const upd = await call('PUT', `/api/triggers/${id}`, { name: 'Spam 2', enabled: true, config: { ...config, groupsMode: 'all', groupJids: [], botRole: 'admin', joinedWithinDays: null, maxMessages: 5 } })
     expect(upd.json()).toEqual({ ok: true })
     expect(getTrigger(id)!.config).toMatchObject({ groupsMode: 'all', botRole: 'admin', joinedWithinDays: null, maxMessages: 5 })
+  })
+
+  it('saves the Spam actions, refuses one that is not true or false, and reads an older trigger as all off', async () => {
+    seedGroup('a@g.us', 'A')
+    const t = seedTenant('One', ['a@g.us'])
+    const config = { ...SPAM_TRIGGER_DEFAULTS, reportGroupJid: 'a@g.us' }
+    const created = await call('POST', `/api/tenants/${t}/triggers`, {
+      type: 'spam', name: 'S', enabled: true, config: { ...config, deleteSpammerCopies: true, removeSpammer: true },
+    })
+    expect(created.statusCode).toBe(200)
+    const id = created.json().id as number
+    expect((await call('GET', `/api/triggers/${id}`)).json().trigger.config)
+      .toMatchObject({ deleteSpammerCopies: true, removeSpammer: true, deleteSuspicious: false })
+
+    const bad = await call('PUT', `/api/triggers/${id}`, { name: 'S', enabled: true, config: { ...config, deleteSuspicious: 'on' } })
+    expect(bad.statusCode).toBe(400)
+    expect(bad.json().error).toBe('Invalid setting: deleteSuspicious')
+    expect(getTrigger(id)!.config).toMatchObject({ deleteSpammerCopies: true, deleteSuspicious: false })
+
+    // saved before the actions existed
+    const { deleteSpammerCopies: _d, removeSpammer: _r, deleteSuspicious: _s, ...older } = config
+    const oldId = seedSpamTrigger(t, 'a@g.us')
+    updateTrigger(oldId, { config: older })
+    expect(getTrigger(oldId)!.config).not.toHaveProperty('removeSpammer')
+    expect((await call('GET', `/api/triggers/${oldId}`)).json().trigger.config)
+      .toMatchObject({ deleteSpammerCopies: false, removeSpammer: false, deleteSuspicious: false })
   })
 
   it('rejects a bad Spam config with the validate message', async () => {

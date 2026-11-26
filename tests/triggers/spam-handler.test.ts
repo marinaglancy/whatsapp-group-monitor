@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { eq } from 'drizzle-orm'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedUser, seedMember, seedMessage, seedTenant, seedSpamTrigger } from '../helpers/fixtures.js'
 import { fakeProvider } from '../helpers/fake-provider.js'
@@ -7,11 +8,15 @@ import { setSetting } from '../../src/db/queries/settings.js'
 import { updateDisplayName } from '../../src/db/queries/users.js'
 import { formatDateTime } from '../../src/utils/time.js'
 import { setTenantGroups } from '../../src/db/queries/tenants.js'
-import { updateBotMembership } from '../../src/db/queries/groups.js'
-import { resolveMentionTokens } from '../../src/whatsapp/actions.js'
+import { getGroup, updateBotMembership } from '../../src/db/queries/groups.js'
+import { getMembership, upsertMembership } from '../../src/db/queries/members.js'
+import { isMessageDeleted } from '../../src/db/queries/activity.js'
+import { getAccountDb } from '../../src/db/account.js'
+import { spamCases } from '../../src/db/schema.js'
+import { resolveMentionTokens, type ActionResult } from '../../src/whatsapp/actions.js'
 import { setTriggerEnabled, updateTrigger } from '../../src/db/queries/triggers.js'
 import { insertJob, getJob, getJobEvents, addJobEvent, addJobAiUsage } from '../../src/db/queries/jobs.js'
-import { findRecentCase } from '../../src/db/queries/spam-cases.js'
+import { createCase, findRecentCase } from '../../src/db/queries/spam-cases.js'
 import { normalizeText } from '../../src/triggers/spam/report.js'
 import { createSpamHandler, loadSpamTrigger, spamErrorTarget } from '../../src/triggers/spam/handler.js'
 import { buildTriggerErrorNotifier, resetErrorThrottleForTests } from '../../src/triggers/error-notifier.js'
@@ -39,6 +44,10 @@ let clock: number
 let posts: { groupJid: string; text: string }[]
 let edits: { groupJid: string; messageId: string; text: string }[]
 let editFails: boolean
+let postFails: boolean
+/** The WhatsApp actions the handler asked for, in order. */
+let actions: string[]
+let communityResult: ActionResult
 
 beforeEach(() => {
   dbs = setupTestDbs()
@@ -46,6 +55,9 @@ beforeEach(() => {
   posts = []
   edits = []
   editFails = false
+  postFails = false
+  actions = []
+  communityResult = { ok: true }
   registerBuiltinTriggerTypes()
   resetErrorThrottleForTests()
   updateBotUser({ id: BOT_JID, lid: BOT_LID } as never)
@@ -83,15 +95,56 @@ function copyJob(groupJid: string, text = TEXT, contentType = 'conversation'): B
 const verdict = (isspam: boolean, isspammer: boolean, reason = 'Ads for followers.') =>
   ({ text: JSON.stringify({ error: false, isspam, isspammer, reason }) })
 
+function botIsAdmin(groupJid: string): boolean {
+  const m = getGroup(groupJid)?.botMembership
+  return m === 'admin' || m === 'superadmin'
+}
+
+/** Stands in for deleteMemberMessage: like it, it refuses where the bot is
+ *  not an admin, and records the delete row at once. */
+function fakeDelete(groupJid: string, messageId: string): ActionResult {
+  if (isMessageDeleted(groupJid, messageId)) return { ok: true }
+  if (!botIsAdmin(groupJid)) return { ok: false, reason: 'not_admin' }
+  seedMessage(groupJid, BOT_LID, '', Math.floor(clock / 1000), { eventType: 'delete', parentId: messageId, metadata: {} })
+  return { ok: true }
+}
+
+/** Stands in for removeFromGroup: never an admin of the group; a user who
+ *  already left counts as done; the group event sets them to 'none'. */
+function fakeRemove(groupJid: string, userJid: string): ActionResult {
+  const m = getMembership(groupJid, userJid)?.membership
+  if (m === 'admin' || m === 'superadmin') return { ok: false, reason: 'is_admin' }
+  if (m === 'none') return { ok: true }
+  if (!botIsAdmin(groupJid)) return { ok: false, reason: 'not_admin' }
+  upsertMembership(groupJid, userJid, 'none')
+  return { ok: true }
+}
+
 let postSeq = 0
 function makeHandler(provider: AiProvider) {
   postSeq = 0
   return createSpamHandler({
     createProvider: () => provider,
-    post: async (groupJid, text) => { posts.push({ groupJid, text }); return `REP${++postSeq}` },
+    post: async (groupJid, text) => {
+      if (postFails) throw new Error('post failed')
+      posts.push({ groupJid, text })
+      return `REP${++postSeq}`
+    },
     edit: async (groupJid, messageId, text) => {
       if (editFails) throw new Error('edit refused')
       edits.push({ groupJid, messageId, text })
+    },
+    deleteMessage: async (groupJid, messageId, senderJid) => {
+      actions.push(`delete ${groupJid} ${messageId} by ${senderJid}`)
+      return fakeDelete(groupJid, messageId)
+    },
+    removeFromGroup: async (groupJid, userJid) => {
+      actions.push(`remove ${userJid} from ${groupJid}`)
+      return fakeRemove(groupJid, userJid)
+    },
+    removeFromCommunity: async (communityJid, userJid) => {
+      actions.push(`remove ${userJid} from community ${communityJid}`)
+      return communityResult
     },
     nowMs: () => clock,
   })
@@ -109,6 +162,28 @@ function suspiciousText(groups: string[], contents = TEXT): string {
   return [
     'Suspicious message by user @spammer',
     ['*Not deleted:*', ...groups.map(g => `- group @${g}`)].join('\n'),
+    contents,
+  ].join('\n\n')
+}
+
+/** The spammer report with the given sections; groups by their short ids. */
+function fullSpammerText(s: { notDeleted?: string[]; deleted?: string[]; removal?: string[] }, contents = TEXT): string {
+  const section = (title: string, groups: string[] = []) => groups.length ? [[title, ...groups.map(g => `- group @${g}`)].join('\n')] : []
+  return [
+    'Detected spam by user @spammer:',
+    ...section('*Not deleted!*', s.notDeleted),
+    ...section('*Deleted messages:*', s.deleted),
+    ...(s.removal?.length ? [s.removal.join('\n')] : []),
+    `*Message contents:*\n${contents}`,
+  ].join('\n\n')
+}
+
+function fullSuspiciousText(s: { notDeleted?: string[]; deleted?: string[] }, contents = TEXT): string {
+  const section = (title: string, groups: string[] = []) => groups.length ? [[title, ...groups.map(g => `- group @${g}`)].join('\n')] : []
+  return [
+    'Suspicious message by user @spammer',
+    ...section('*Not deleted:*', s.notDeleted),
+    ...section('*Deleted:*', s.deleted),
     contents,
   ].join('\n\n')
 }
@@ -587,6 +662,323 @@ describe('spam_check handler: stops', () => {
     const provider = fakeProvider([])
     await expect(makeHandler(provider)(copyJob('a@g.us'))).rejects.toBeInstanceOf(TriggerJobError)
     expect(provider.calls.length).toBe(0)
+  })
+})
+
+describe('spam_check handler: acting on the verdict (phase 2)', () => {
+  function admin(...groups: string[]): void {
+    for (const g of groups) updateBotMembership(g, 'admin')
+  }
+  const eventTypes = (job: BotJob) => getJobEvents(job.id).map(e => e.eventType)
+
+  it('does nothing to the messages or the user when no action is ticked for the verdict', async () => {
+    admin('a@g.us', 'b@g.us')
+    // a spammer verdict: only the suspicious action is ticked
+    setConfig({ deleteSuspicious: true })
+    seedCopy('b@g.us')
+    const first = copyJob('a@g.us')
+    await makeHandler(fakeProvider([verdict(true, true)]))(first)
+    expect(posts.map(p => p.text)).toEqual([spammerText(['a', 'b'])])
+    expect(eventTypes(first)).toEqual(['ai_call', 'report_posted'])
+
+    // a suspicious verdict: only the spammer actions are ticked
+    setConfig({ deleteSpammerCopies: true, removeSpammer: true })
+    await makeHandler(fakeProvider([verdict(true, false)]))(copyJob('c@g.us', 'Another ad https://x.y/other'))
+    // not spam: everything is ticked
+    setConfig({ deleteSpammerCopies: true, removeSpammer: true, deleteSuspicious: true })
+    await makeHandler(fakeProvider([verdict(false, false)]))(copyJob('d@g.us', 'A third text https://x.y/3'))
+
+    expect(actions).toEqual([])
+    expect(posts.length).toBe(2)
+  })
+
+  it('deletes every copy of a spammer\'s message, by the author id as stored, and lists them under "Deleted messages:"', async () => {
+    admin('a@g.us', 'b@g.us')
+    setConfig({ deleteSpammerCopies: true })
+    const earlier = seedCopy('b@g.us', TEXT, 'conversation', NOW_S - 60)
+    const job = copyJob('a@g.us')
+    const result = await makeHandler(fakeProvider([verdict(true, true)]))(job)
+
+    expect(actions).toEqual([
+      `delete b@g.us ${earlier} by spammer@lid`,
+      `delete a@g.us ${job.messageId} by spammer@lid`,
+    ])
+    expect(isMessageDeleted('b@g.us', earlier)).toBe(true)
+    expect(isMessageDeleted('a@g.us', job.messageId!)).toBe(true)
+    expect(posts).toEqual([{ groupJid: 'rep@g.us', text: fullSpammerText({ deleted: ['b', 'a'] }) }])
+    expect(result).toMatchObject({ report: 'posted' })
+    // what the job did is kept before the report goes out
+    expect(eventTypes(job)).toEqual(['ai_call', 'spam_actions', 'report_posted'])
+    expect(getJobEvents(job.id)[1].data).toMatchObject({ notDeleted: [], deleted: ['b@g.us', 'a@g.us'] })
+    expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)!.state).toEqual({
+      notDeleted: [], deleted: ['b@g.us', 'a@g.us'], removedFrom: [], notRemovedFrom: [],
+    })
+  })
+
+  it('a wave where the bot is admin in 2 of 3 groups gives one report: 2 deleted, 1 not deleted (Review Focus 5)', async () => {
+    admin('a@g.us', 'b@g.us')
+    setConfig({ deleteSpammerCopies: true })
+    const jobs = ['a@g.us', 'b@g.us', 'c@g.us'].map(g => copyJob(g))
+    const provider = fakeProvider([verdict(true, true)])
+    const handle = makeHandler(provider)
+    const results = []
+    for (const job of jobs) {
+      results.push(await handle(job))
+      clock += 2_000
+    }
+
+    expect(provider.calls.length).toBe(1)
+    expect(posts).toEqual([{ groupJid: 'rep@g.us', text: fullSpammerText({ notDeleted: ['c'], deleted: ['a', 'b'] }) }])
+    expect(edits).toEqual([])
+    // the first job deleted b's copy; the job for c's copy tried again, with nothing new to report
+    expect(results[1]).toEqual({ note: 'already deleted' })
+    expect(results[2]).toMatchObject({ reused: true, report: 'unchanged', reportMessageId: 'REP1' })
+    expect(actions.filter(a => a.startsWith('delete c@g.us'))).toHaveLength(2)
+  })
+
+  it('a later job deletes a copy the first job could not, and moves its group to "Deleted messages:"', async () => {
+    admin('a@g.us')
+    setConfig({ deleteSpammerCopies: true })
+    const late = copyJob('c@g.us')
+    const handle = makeHandler(fakeProvider([verdict(true, true)]))
+    await handle(copyJob('a@g.us'))
+    expect(posts.map(p => p.text)).toEqual([fullSpammerText({ notDeleted: ['c'], deleted: ['a'] })])
+
+    admin('c@g.us') // the bot was made an admin of c
+    clock += 30_000
+    const result = await handle(late)
+    expect(result).toMatchObject({ reused: true, report: 'edited', reportMessageId: 'REP1' })
+    expect(edits).toEqual([{ groupJid: 'rep@g.us', messageId: 'REP1', text: fullSpammerText({ deleted: ['a', 'c'] }) }])
+    expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)!.state)
+      .toMatchObject({ notDeleted: [], deleted: ['a@g.us', 'c@g.us'] })
+  })
+
+  it('deletes only its own message for a suspicious verdict; each job of the wave deletes its own and edits the report', async () => {
+    admin('a@g.us', 'b@g.us')
+    setConfig({ deleteSuspicious: true })
+    const jobs = ['a@g.us', 'b@g.us', 'c@g.us'].map(g => copyJob(g))
+    const provider = fakeProvider([verdict(true, false)])
+    const handle = makeHandler(provider)
+
+    await handle(jobs[0])
+    expect(actions).toEqual([`delete a@g.us ${jobs[0].messageId} by spammer@lid`])
+    expect(isMessageDeleted('b@g.us', jobs[1].messageId!)).toBe(false)
+    expect(posts.map(p => p.text)).toEqual([fullSuspiciousText({ notDeleted: ['b', 'c'], deleted: ['a'] })])
+
+    clock += 2_000
+    expect(await handle(jobs[1])).toMatchObject({ reused: true, report: 'edited' })
+    clock += 2_000
+    expect(await handle(jobs[2])).toMatchObject({ reused: true, report: 'unchanged' })
+
+    expect(provider.calls.length).toBe(1)
+    expect(posts.length).toBe(1)
+    expect(edits.map(e => e.text)).toEqual([fullSuspiciousText({ notDeleted: ['c'], deleted: ['a', 'b'] })])
+    expect(actions.slice(1)).toEqual([
+      `delete b@g.us ${jobs[1].messageId} by spammer@lid`,
+      `delete c@g.us ${jobs[2].messageId} by spammer@lid`,
+    ])
+  })
+
+  it('removes a spammer from each group with a copy, never from a group where they are admin, and says so (Review Focus 5)', async () => {
+    admin('a@g.us', 'b@g.us')
+    seedMember('b@g.us', SPAMMER, 'admin')
+    setConfig({ removeSpammer: true })
+    seedCopy('b@g.us')
+    seedCopy('c@g.us') // the bot is not an admin of c
+    const job = copyJob('a@g.us')
+    await makeHandler(fakeProvider([verdict(true, true)]))(job)
+
+    expect(actions).toEqual([
+      'remove spammer@lid from a@g.us',
+      'remove spammer@lid from b@g.us',
+      'remove spammer@lid from c@g.us',
+    ])
+    expect(getMembership('a@g.us', SPAMMER)!.membership).toBe('none')
+    expect(getMembership('b@g.us', SPAMMER)!.membership).toBe('admin')
+    expect(posts.map(p => p.text)).toEqual([fullSpammerText({
+      notDeleted: ['a', 'b', 'c'],
+      removal: ['User removed from: @a', 'Could not remove the user from: @b, @c'],
+    })])
+    expect(eventTypes(job)).toEqual(['ai_call', 'spam_actions', 'report_posted'])
+    expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)!.state)
+      .toEqual({ notDeleted: ['a@g.us', 'b@g.us', 'c@g.us'], deleted: [], removedFrom: ['a@g.us'], notRemovedFrom: ['b@g.us', 'c@g.us'] })
+  })
+
+  describe('in a community', () => {
+    beforeEach(() => {
+      seedGroup('com@g.us', 'Community', { isCommunity: true, botMembership: 'admin' })
+      seedGroup('ca@g.us', 'Community A', { parentCommunityJid: 'com@g.us' })
+      seedGroup('cb@g.us', 'Community B', { parentCommunityJid: 'com@g.us' })
+      setTenantGroups(tenantId, ['com@g.us', 'a@g.us', 'b@g.us', 'c@g.us', 'd@g.us', 'rep@g.us'])
+      admin('c@g.us')
+      setConfig({ removeSpammer: true })
+      seedCopy('cb@g.us')
+      seedCopy('c@g.us')
+    })
+
+    it('removes the spammer from the community when the bot is its admin, and from the groups outside it', async () => {
+      await makeHandler(fakeProvider([verdict(true, true)]))(copyJob('ca@g.us'))
+      expect(actions).toEqual(['remove spammer@lid from community com@g.us', 'remove spammer@lid from c@g.us'])
+      expect(posts.map(p => p.text)).toEqual([fullSpammerText({
+        notDeleted: ['c', 'ca', 'cb'],
+        removal: ['User removed from the community', 'User removed from: @c'],
+      })])
+      expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)!.state)
+        .toMatchObject({ community: 'removed', removedFrom: ['c@g.us'], notRemovedFrom: [] })
+    })
+
+    it('says the user is not removed from the community when it refuses, and leaves its groups to it', async () => {
+      communityResult = { ok: false, reason: 'is_admin' }
+      await makeHandler(fakeProvider([verdict(true, true)]))(copyJob('ca@g.us'))
+      expect(actions).toEqual(['remove spammer@lid from community com@g.us', 'remove spammer@lid from c@g.us'])
+      expect(posts[0].text).toContain('\n\nUser is not removed from the community\nUser removed from: @c\n\n')
+    })
+
+    it('removes from each group when the bot is not an admin of the community', async () => {
+      updateBotMembership('com@g.us', 'participant')
+      admin('ca@g.us')
+      await makeHandler(fakeProvider([verdict(true, true)]))(copyJob('ca@g.us'))
+      expect(actions).toEqual([
+        'remove spammer@lid from c@g.us',
+        'remove spammer@lid from ca@g.us',
+        'remove spammer@lid from cb@g.us',
+      ])
+      expect(posts[0].text).toContain('\n\nUser removed from: @c, @ca\nCould not remove the user from: @cb\n\n')
+      expect(posts[0].text).not.toContain('community')
+    })
+
+    it('removes from each group when the message\'s group is not in the community', async () => {
+      await makeHandler(fakeProvider([verdict(true, true)]))(copyJob('c@g.us', TEXT))
+      expect(actions.some(a => a.includes('community'))).toBe(false)
+      expect(actions).toContain('remove spammer@lid from cb@g.us')
+    })
+
+    it('"removed from the community" wins over an earlier refusal when a later job succeeds', async () => {
+      communityResult = { ok: false, reason: 'failed', detail: '500' }
+      const later = copyJob('cb@g.us')
+      const handle = makeHandler(fakeProvider([verdict(true, true)]))
+      await handle(copyJob('ca@g.us'))
+      expect(posts[0].text).toContain('User is not removed from the community')
+
+      communityResult = { ok: true }
+      clock += 30_000
+      expect(await handle(later)).toMatchObject({ report: 'edited' })
+      expect(edits[0].text).toContain('\n\nUser removed from the community\nUser removed from: @c\n\n')
+      expect(edits[0].text).not.toContain('not removed')
+    })
+  })
+
+  it('deletes before removing, and the report lists both', async () => {
+    admin('a@g.us', 'b@g.us')
+    setConfig({ deleteSpammerCopies: true, removeSpammer: true })
+    const copy = seedCopy('b@g.us')
+    const job = copyJob('a@g.us')
+    await makeHandler(fakeProvider([verdict(true, true)]))(job)
+    expect(actions).toEqual([
+      `delete a@g.us ${job.messageId} by spammer@lid`,
+      `delete b@g.us ${copy} by spammer@lid`,
+      'remove spammer@lid from a@g.us',
+      'remove spammer@lid from b@g.us',
+    ])
+    expect(posts.map(p => p.text)).toEqual([fullSpammerText({ deleted: ['a', 'b'], removal: ['User removed from: @a, @b'] })])
+  })
+
+  it('skips a user already removed: a later job leaves the report unchanged, without an error (Review Focus 5)', async () => {
+    admin('a@g.us', 'b@g.us')
+    setConfig({ removeSpammer: true })
+    const later = copyJob('b@g.us')
+    const handle = makeHandler(fakeProvider([verdict(true, true)]))
+    await handle(copyJob('a@g.us'))
+    clock += 30_000
+    const result = await handle(later)
+
+    expect(result).toMatchObject({ reused: true, report: 'unchanged', reportMessageId: 'REP1' })
+    expect(posts.map(p => p.text)).toEqual([fullSpammerText({ notDeleted: ['a', 'b'], removal: ['User removed from: @a, @b'] })])
+    expect(edits).toEqual([])
+  })
+
+  it('moves a group from "Could not remove" to "User removed from" when a later job removes the user there', async () => {
+    admin('a@g.us')
+    setConfig({ removeSpammer: true })
+    const later = copyJob('c@g.us')
+    const handle = makeHandler(fakeProvider([verdict(true, true)]))
+    await handle(copyJob('a@g.us'))
+    expect(posts[0].text).toContain('User removed from: @a\nCould not remove the user from: @c')
+
+    admin('c@g.us')
+    clock += 30_000
+    await handle(later)
+    expect(edits.map(e => e.text)).toEqual([fullSpammerText({ notDeleted: ['a', 'c'], removal: ['User removed from: @a, @c'] })])
+  })
+
+  it('shows no removal lines when "Remove the user" is off, even if the case has them', async () => {
+    admin('a@g.us')
+    setConfig({ removeSpammer: true })
+    const handle = makeHandler(fakeProvider([verdict(true, true)]))
+    await handle(copyJob('a@g.us'))
+    expect(posts[0].text).toContain('User removed from: @a')
+
+    setConfig({})
+    clock += 30_000
+    await handle(copyJob('b@g.us')) // a new copy
+    expect(actions).toEqual(['remove spammer@lid from a@g.us'])
+    expect(edits.map(e => e.text)).toEqual([spammerText(['a', 'b'])])
+  })
+
+  it('merges with a report saved before phase 2, whose state has no removal lists', async () => {
+    const caseId = createCase({ triggerId, userJid: SPAMMER, textKey: normalizeText(TEXT), verdict: { isspam: true, isspammer: true }, now: NOW_MS })
+    getAccountDb().update(spamCases).set({
+      reportGroupJid: 'rep@g.us', reportMessageId: 'OLD', reportPostedAt: NOW_MS,
+      state: { notDeleted: ['a@g.us'], deleted: [] } as never,
+    }).where(eq(spamCases.id, caseId)).run()
+    expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)!.state)
+      .toEqual({ notDeleted: ['a@g.us'], deleted: [], removedFrom: [], notRemovedFrom: [] })
+
+    admin('b@g.us')
+    setConfig({ removeSpammer: true })
+    clock += 30_000
+    const provider = fakeProvider([])
+    const result = await makeHandler(provider)(copyJob('b@g.us'))
+    expect(provider.calls.length).toBe(0)
+    expect(result).toMatchObject({ reused: true, report: 'edited', reportMessageId: 'OLD' })
+    expect(edits.map(e => e.text)).toEqual([fullSpammerText({ notDeleted: ['a', 'b'], removal: ['User removed from: @b'] })])
+  })
+
+  it('a retry after the report failed to post posts it with the deletions, without acting again (R18)', async () => {
+    admin('a@g.us', 'b@g.us')
+    setConfig({ deleteSpammerCopies: true })
+    seedCopy('b@g.us')
+    const job = copyJob('a@g.us')
+    const provider = fakeProvider([verdict(true, true)])
+    const handle = makeHandler(provider)
+    postFails = true
+    await expect(handle(job)).rejects.toThrow('post failed')
+    expect(isMessageDeleted('a@g.us', job.messageId!)).toBe(true)
+    expect(actions).toHaveLength(2)
+
+    postFails = false
+    clock += 60_000
+    const result = await handle(getJob(job.id)!)
+    expect(result).toMatchObject({ verdict: { isspammer: true }, report: 'posted', reportMessageId: 'REP1' })
+    expect(posts).toEqual([{ groupJid: 'rep@g.us', text: fullSpammerText({ deleted: ['a', 'b'] }) }])
+    expect(actions).toHaveLength(2)
+    expect(provider.calls.length).toBe(1)
+    expect(eventTypes(job)).toEqual(['ai_call', 'spam_actions', 'report_posted'])
+    expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)).toMatchObject({
+      reportMessageId: 'REP1', state: { notDeleted: [], deleted: ['a@g.us', 'b@g.us'] },
+    })
+  })
+
+  it('a retry of a job for a message without text still posts its report', async () => {
+    admin('a@g.us')
+    setConfig({ deleteSpammerCopies: true })
+    const job = copyJob('a@g.us', '', 'imageMessage')
+    const handle = makeHandler(fakeProvider([verdict(true, true)]))
+    postFails = true
+    await expect(handle(job)).rejects.toThrow('post failed')
+    postFails = false
+    await handle(getJob(job.id)!)
+    expect(posts.map(p => p.text)).toEqual([fullSpammerText({ deleted: ['a'] }, '(image)')])
   })
 })
 

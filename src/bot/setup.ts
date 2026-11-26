@@ -5,7 +5,9 @@ import {
 } from './responder.js'
 import { addJobEvent, hasJobEvent } from '../db/queries/jobs.js'
 import { getSock } from '../whatsapp/client.js'
-import { editGroupMessage, postGroupMessage } from '../whatsapp/actions.js'
+import {
+  deleteMemberMessage, editGroupMessage, postGroupMessage, removeFromCommunity, removeFromGroup,
+} from '../whatsapp/actions.js'
 import { getCreationRecord } from '../db/queries/activity.js'
 import { getAiSettings } from '../ai/settings.js'
 import { executeQaTool, toolExecutorNames } from '../ai/tools/executors.js'
@@ -155,6 +157,9 @@ export function setupBot(overrides: BotOverrides = {}): void {
     createProvider: deps.createProvider,
     post: post ?? postGroupMessage,
     edit: edit ?? editGroupMessage,
+    deleteMessage: deleteMemberMessage,
+    removeFromGroup,
+    removeFromCommunity,
     nowMs: deps.nowMs,
   }
   registerJobHandler('spam_check', createSpamHandler(spamDeps), {

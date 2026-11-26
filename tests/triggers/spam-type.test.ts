@@ -219,6 +219,21 @@ describe('Spam trigger type', () => {
     for (const p of ['(spam|scam)', '\\d+', '(abc)+']) expect(ok(p)).toBe(true)
   })
 
+  it('has the three actions off by default, and refuses a value that is not true or false', () => {
+    const ctx = { coveredGroupJids: ['rep@g.us'] }
+    expect(spamTriggerType.defaults()).toMatchObject({ deleteSpammerCopies: false, removeSpammer: false, deleteSuspicious: false })
+    // a trigger saved before the actions existed has them off
+    expect(spamTriggerType.normalize({ reportGroupJid: 'rep@g.us' }))
+      .toMatchObject({ deleteSpammerCopies: false, removeSpammer: false, deleteSuspicious: false })
+    const result = (over: Record<string, unknown>) => spamTriggerType.validate({ reportGroupJid: 'rep@g.us', ...over }, ctx)
+    expect(result({ deleteSpammerCopies: true, removeSpammer: true, deleteSuspicious: true })).toMatchObject({
+      ok: true, config: { deleteSpammerCopies: true, removeSpammer: true, deleteSuspicious: true },
+    })
+    expect(result({ deleteSpammerCopies: 'yes' })).toEqual({ ok: false, error: 'Invalid setting: deleteSpammerCopies' })
+    expect(result({ removeSpammer: 1 })).toEqual({ ok: false, error: 'Invalid setting: removeSpammer' })
+    expect(result({ deleteSuspicious: null })).toEqual({ ok: false, error: 'Invalid setting: deleteSuspicious' })
+  })
+
   it('normalize fills the defaults', () => {
     const c = spamTriggerType.normalize({ reportGroupJid: 'rep@g.us', waitSeconds: 3, junk: 1 })
     expect(c).toMatchObject({ groupsMode: 'all', botRole: 'any', contentLink: true, contentImage: true, contentRegex: '',
@@ -231,6 +246,10 @@ describe('Spam trigger type', () => {
     expect(spamTriggerType.summarize(cfg({ waitSeconds: 0 }), name)).toBe('all groups · reports to Reports')
     expect(spamTriggerType.summarize(cfg({ groupsMode: 'except', groupJids: ['a@g.us', 'b@g.us'], botRole: 'admin' }), name))
       .toBe('except 2 groups · reports to Reports · admin groups only · wait 10 s')
+    expect(spamTriggerType.summarize(cfg({ waitSeconds: 0, deleteSpammerCopies: true, removeSpammer: true }), name))
+      .toBe('all groups · reports to Reports · deletes spam · removes spammers')
+    expect(spamTriggerType.summarize(cfg({ waitSeconds: 0, deleteSuspicious: true }), name))
+      .toBe('all groups · reports to Reports · deletes suspicious messages')
     expect(spamTriggerType.warning(cfg(), ['rep@g.us'])).toBeNull()
     expect(spamTriggerType.warning(cfg({ reportGroupJid: '' }), ['rep@g.us'])).toBe('Choose a notification group in this tenant')
     expect(spamTriggerType.warning(cfg(), ['a@g.us'])).toBe('Choose a notification group in this tenant')

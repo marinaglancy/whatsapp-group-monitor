@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedMessage } from '../helpers/fixtures.js'
-import { findRecentCase, createCase, updateCaseReport } from '../../src/db/queries/spam-cases.js'
+import { eq } from 'drizzle-orm'
+import { findRecentCase, createCase, fullCaseState, getCase, updateCaseReport } from '../../src/db/queries/spam-cases.js'
+import { getAccountDb } from '../../src/db/account.js'
+import { spamCases } from '../../src/db/schema.js'
 import { isMessageDeleted, findUserCopies } from '../../src/db/queries/activity.js'
 
 let dbs: ReturnType<typeof setupTestDbs>
@@ -22,13 +25,25 @@ describe('spam cases', () => {
   })
   it('stores the report and its state', () => {
     const id = createCase({ triggerId: 1, userJid: 'u@lid', textKey: 'k', verdict: { isspam: true } })
-    updateCaseReport(id, { reportGroupJid: 'n@g.us', reportMessageId: 'R1', reportPostedAt: 5, state: { notDeleted: ['a@g.us'], deleted: [], removal: 'x' } })
+    const state = { notDeleted: ['a@g.us'], deleted: ['b@g.us'], removedFrom: ['b@g.us'], notRemovedFrom: ['a@g.us'], community: 'removed' as const }
+    updateCaseReport(id, { reportGroupJid: 'n@g.us', reportMessageId: 'R1', reportPostedAt: 5, state })
     const c = findRecentCase(1, 'u@lid', 'k', 0)!
     expect(c.reportMessageId).toBe('R1')
     expect(c.reportGroupJid).toBe('n@g.us')
     expect(c.reportPostedAt).toBe(5)
-    expect(c.state).toEqual({ notDeleted: ['a@g.us'], deleted: [], removal: 'x' })
+    expect(c.state).toEqual(state)
     expect(c.verdict).toEqual({ isspam: true })
+    expect(getCase(id)).toEqual(c)
+    expect(getCase(id + 1)).toBeNull()
+  })
+  it('reads a state saved before the removal lists existed with empty lists', () => {
+    const id = createCase({ triggerId: 1, userJid: 'u@lid', textKey: 'k', verdict: { isspam: true } })
+    expect(getCase(id)!.state).toBeNull()
+    getAccountDb().update(spamCases).set({ state: { notDeleted: ['a@g.us'], deleted: [] } as never }).where(eq(spamCases.id, id)).run()
+    const full = { notDeleted: ['a@g.us'], deleted: [], removedFrom: [], notRemovedFrom: [] }
+    expect(findRecentCase(1, 'u@lid', 'k', 0)!.state).toEqual(full)
+    expect(getCase(id)!.state).toEqual(full)
+    expect(fullCaseState({ notDeleted: ['a@g.us', 3], community: 'maybe', junk: 1 })).toEqual(full)
   })
 })
 
