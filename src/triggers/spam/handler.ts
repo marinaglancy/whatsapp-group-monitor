@@ -8,14 +8,15 @@ import { spamTriggerType, type SpamTriggerConfig } from './type.js'
 import { SPAM_COPY_WINDOW_MS, SPAM_EDIT_WINDOW_MS, SPAM_REUSE_WINDOW_MS } from './defaults.js'
 import { SPAM_ANSWER_SPEC } from './answer.js'
 import { normalizeText, removalLines, spammerReport, suspiciousReport } from './report.js'
+import { act, type Copy, type SpamActions } from './act.js'
+import { mergeState, sameState } from './state.js'
 import { resolveTenantScope, type QaScope } from '../../bot/scope.js'
 import type { JobHandler } from '../../bot/worker.js'
-import { EDIT_KEEPS_GROUP_MENTIONS, type ActionResult } from '../../whatsapp/actions.js'
+import { EDIT_KEEPS_GROUP_MENTIONS } from '../../whatsapp/actions.js'
 import { getBotUser } from '../../whatsapp/handlers/connection.js'
 import { countUserMessagesBefore, findUserCopies, getCreationRecord, isMessageDeleted } from '../../db/queries/activity.js'
 import { createCase, findRecentCase, fullCaseState, getCase, updateCaseReport } from '../../db/queries/spam-cases.js'
 import { getMembership } from '../../db/queries/members.js'
-import { getAllGroups } from '../../db/queries/groups.js'
 import { getTenantCoveredGroupJids, getTenantIdForGroup } from '../../db/queries/tenants.js'
 import { getTrigger } from '../../db/queries/triggers.js'
 import { addJobEvent, getJobEvents, hasJobEvent } from '../../db/queries/jobs.js'
@@ -44,19 +45,12 @@ const TEXT_END = '----- end of the message text -----'
  *  row of dashes, or names the message text. */
 const MARKER_LIKE_RE = /^\s*\p{Pd}{3,}|of the message text/iu
 
-export interface SpamDeps {
+export interface SpamDeps extends SpamActions {
   createProvider: (o: { apiKey: string; model: string }) => AiProvider
   /** Post a message in a group (postGroupMessage); returns its id. */
   post: (groupJid: string, text: string) => Promise<string>
   /** Replace the text of a message the bot posted (editGroupMessage). */
   edit: (groupJid: string, messageId: string, text: string) => Promise<void>
-  /** Delete a member's message as an admin (deleteMemberMessage); senderJid
-   *  is its author as stored on the message's activity row. */
-  deleteMessage: (groupJid: string, messageId: string, senderJid: string) => Promise<ActionResult>
-  /** Remove a user from a group (removeFromGroup). */
-  removeFromGroup: (groupJid: string, userJid: string) => Promise<ActionResult>
-  /** Remove a user from a community and so from all its groups (removeFromCommunity). */
-  removeFromCommunity: (communityJid: string, userJid: string) => Promise<ActionResult>
   nowMs?: () => number // injectable clock for tests
 }
 
@@ -72,19 +66,6 @@ interface CheckedMessage {
   media: string | null
   /** Unix seconds. */
   timestamp: number
-}
-
-type Copy = { groupJid: string; messageId: string; timestamp: number }
-
-/** An action that did not happen, kept in the job log. */
-type NotDone = { action: 'delete' | 'remove'; jid: string; reason: string; detail?: string }
-
-function unique(items: string[]): string[] {
-  return [...new Set(items)]
-}
-
-function isAdminLevel(membership: string | null | undefined): boolean {
-  return membership === 'admin' || membership === 'superadmin'
 }
 
 /** Why reports and errors cannot go to the notification group, or null when
@@ -187,96 +168,6 @@ function actionsDone(jobId: number): { caseId: number | null; verdict: SpamVerdi
   if (!data) return null
   const verdict = typeof data.verdict === 'object' && data.verdict !== null ? data.verdict as SpamVerdict : {}
   return { caseId: typeof data.caseId === 'number' ? data.caseId : null, verdict, state: fullCaseState(data) }
-}
-
-interface ActInput { msg: CheckedMessage; copies: Copy[]; spammer: boolean; config: SpamTriggerConfig }
-
-/** Act on a spam verdict with the actions ticked for it (spec §6.3), and
- *  return what the report lists. A spammer's copies are all deleted; for a
- *  suspicious message only this job's own one, as each copy has its own job.
- *  Deleting comes before removing. tried is false when no action is ticked. */
-async function act(
-  deps: SpamDeps, { msg, copies, spammer, config }: ActInput,
-): Promise<{ state: SpamCaseState; notDone: NotDone[]; tried: boolean }> {
-  const state: SpamCaseState = { notDeleted: [], deleted: [], removedFrom: [], notRemovedFrom: [] }
-  const notDone: NotDone[] = []
-  const isOwn = (c: Copy) => c.groupJid === msg.groupJid && c.messageId === msg.messageId
-  const toDelete = spammer
-    ? (config.deleteSpammerCopies ? copies : [])
-    : (config.deleteSuspicious ? copies.filter(isOwn) : [])
-  for (const c of copies) {
-    const r = toDelete.includes(c) ? await deps.deleteMessage(c.groupJid, c.messageId, msg.userJid) : null
-    if (r?.ok) {
-      state.deleted.push(c.groupJid)
-      continue
-    }
-    state.notDeleted.push(c.groupJid)
-    if (r && !r.ok) notDone.push({ action: 'delete', jid: c.groupJid, reason: r.reason, detail: r.detail })
-  }
-  const removing = spammer && config.removeSpammer
-  if (removing) await removeSpammer(deps, msg, copies, state, notDone)
-  return { state: mergeState(null, state), notDone, tried: toDelete.length > 0 || removing }
-}
-
-/** Remove a spammer (spec §6.4): from the community of the message's group
- *  when the bot is an admin of it, and from every other group with a copy
- *  (every one of them when the community is not used). A group where the
- *  user stays (an admin there, the bot is not an admin, or WhatsApp
- *  refused) is listed as not removed. */
-async function removeSpammer(
-  deps: SpamDeps, msg: CheckedMessage, copies: Copy[], state: SpamCaseState, notDone: NotDone[],
-): Promise<void> {
-  const groups = new Map(getAllGroups().map(g => [g.jid, g]))
-  const parent = groups.get(msg.groupJid)?.parentCommunityJid ?? null
-  const community = parent && isAdminLevel(groups.get(parent)?.botMembership) ? parent : null
-  if (community) {
-    const r = await deps.removeFromCommunity(community, msg.userJid)
-    state.community = r.ok ? 'removed' : 'not_removed'
-    if (!r.ok) notDone.push({ action: 'remove', jid: community, reason: r.reason, detail: r.detail })
-  }
-  for (const groupJid of unique(copies.map(c => c.groupJid))) {
-    // the community removal covers its own groups
-    if (community && groups.get(groupJid)?.parentCommunityJid === community) continue
-    const r = await deps.removeFromGroup(groupJid, msg.userJid)
-    if (r.ok) {
-      state.removedFrom.push(groupJid)
-    } else {
-      state.notRemovedFrom.push(groupJid)
-      notDone.push({ action: 'remove', jid: groupJid, reason: r.reason, detail: r.detail })
-    }
-  }
-}
-
-/** The report's lists after this job (ruling R15): what is done wins, so a
- *  group whose copy a later job deleted moves from "not deleted" to
- *  "deleted", a group the user was removed from leaves "could not remove",
- *  and a community removal that succeeded once stays "removed". */
-function mergeState(earlier: SpamCaseState | null, fresh: SpamCaseState): SpamCaseState {
-  const both = (key: 'notDeleted' | 'deleted' | 'removedFrom' | 'notRemovedFrom') =>
-    unique([...(earlier?.[key] ?? []), ...fresh[key]])
-  const deleted = both('deleted')
-  const removedFrom = both('removedFrom')
-  const state: SpamCaseState = {
-    notDeleted: both('notDeleted').filter(g => !deleted.includes(g)),
-    deleted,
-    removedFrom,
-    notRemovedFrom: both('notRemovedFrom').filter(g => !removedFrom.includes(g)),
-  }
-  const community = earlier?.community === 'removed' || fresh.community === 'removed'
-    ? 'removed' : earlier?.community ?? fresh.community
-  if (community) state.community = community
-  return state
-}
-
-function sameSet(a: string[], b: string[]): boolean {
-  const set = new Set(a)
-  return set.size === new Set(b).size && b.every(x => set.has(x))
-}
-
-function sameState(a: SpamCaseState, b: SpamCaseState): boolean {
-  return sameSet(a.notDeleted, b.notDeleted) && sameSet(a.deleted, b.deleted)
-    && sameSet(a.removedFrom, b.removedFrom) && sameSet(a.notRemovedFrom, b.notRemovedFrom)
-    && a.community === b.community
 }
 
 function checkedMessage(job: BotJob, now: () => number): CheckedMessage {
