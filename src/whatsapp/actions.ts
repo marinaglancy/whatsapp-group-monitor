@@ -183,8 +183,39 @@ function failed(err: unknown): ActionResult {
   return { ok: false, reason: 'failed', detail: err instanceof Error ? err.message : String(err) }
 }
 
+/** Deletes and removals go out like a person doing them one after another:
+ *  each request waits until a random 0.25 to 0.8 seconds have passed since the
+ *  previous one. Only requests that reach WhatsApp count. */
+const ACTION_GAP_MIN_MS = 250
+const ACTION_GAP_MAX_MS = 800
+
+interface ActionPacing { now(): number; random(): number; sleep(ms: number): Promise<void> }
+const realPacing: ActionPacing = {
+  now: () => Date.now(),
+  random: () => Math.random(),
+  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+}
+let pacing = realPacing
+let lastActionSentAt: number | null = null
+
+/** Tests replace the clock, the random number and the sleep; null restores the real ones. */
+export function setActionPacingForTests(p: ActionPacing | null): void {
+  pacing = p ?? realPacing
+  lastActionSentAt = null
+}
+
+async function waitBeforeAction(): Promise<void> {
+  if (lastActionSentAt !== null) {
+    const gap = ACTION_GAP_MIN_MS + pacing.random() * (ACTION_GAP_MAX_MS - ACTION_GAP_MIN_MS)
+    const wait = lastActionSentAt + gap - pacing.now()
+    if (wait > 0) await pacing.sleep(wait)
+  }
+  lastActionSentAt = pacing.now()
+}
+
 /** Run a remove call for one participant and read WhatsApp's status for them. */
 async function removeParticipant(call: () => Promise<{ status: string }[]>): Promise<ActionResult> {
+  await waitBeforeAction()
   try {
     const [result] = await call()
     // 404: not a participant, so the user is already gone
@@ -193,36 +224,6 @@ async function removeParticipant(call: () => Promise<{ status: string }[]>): Pro
   } catch (err) {
     return failed(err)
   }
-}
-
-/** Deletes go out like a person deleting one message after another: each
- *  request waits until a random 0.5 to 1.2 seconds have passed since the
- *  previous one. Only requests that reach WhatsApp count. */
-const DELETE_GAP_MIN_MS = 500
-const DELETE_GAP_MAX_MS = 1200
-
-interface DeletePacing { now(): number; random(): number; sleep(ms: number): Promise<void> }
-const realPacing: DeletePacing = {
-  now: () => Date.now(),
-  random: () => Math.random(),
-  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
-}
-let pacing = realPacing
-let lastDeleteSentAt: number | null = null
-
-/** Tests replace the clock, the random number and the sleep; null restores the real ones. */
-export function setDeletePacingForTests(p: DeletePacing | null): void {
-  pacing = p ?? realPacing
-  lastDeleteSentAt = null
-}
-
-async function waitBeforeDelete(): Promise<void> {
-  if (lastDeleteSentAt !== null) {
-    const gap = DELETE_GAP_MIN_MS + pacing.random() * (DELETE_GAP_MAX_MS - DELETE_GAP_MIN_MS)
-    const wait = lastDeleteSentAt + gap - pacing.now()
-    if (wait > 0) await pacing.sleep(wait)
-  }
-  lastDeleteSentAt = pacing.now()
 }
 
 /** Delete a member's message as a group admin. senderJid goes into the key as
@@ -236,7 +237,7 @@ export async function deleteMemberMessage(groupJid: string, messageId: string, s
   // Pre-generated: the row recorded below and Baileys' echo of the delete
   // (messages.upsert, which can come first) share this id, so one is a duplicate.
   const deleteId = generateMessageID()
-  await waitBeforeDelete()
+  await waitBeforeAction()
   try {
     await getSock().sendMessage(groupJid, { delete: key }, { messageId: deleteId })
   } catch (err) {
