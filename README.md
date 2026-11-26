@@ -212,6 +212,13 @@ two questions: is the message **spam**, and is the sender a **spammer**. A long-
 who posts one ad is spam but not a spammer. If the AI says the message is not spam, nothing
 is posted.
 
+**Pictures are not analysed.** The "it has an image" condition only decides which messages
+are checked. The AI never sees the picture itself: it knows only that the message has an
+image, plus its caption, the sender and their other messages. So spam that is only in a
+picture (an ad without a caption) is usually not caught. Sending every picture to the AI
+was left out on purpose: many groups post lots of event photos, and that would quickly use
+up the AI budget.
+
 **Deleting and removing** rules:
 
 - The bot can only delete messages or remove users in groups where it is an admin.
