@@ -217,10 +217,12 @@ is posted.
 - The bot can only delete messages or remove users in groups where it is an admin.
 - If the message or one of its copies was posted in a community where the bot is a
   community admin, the user is removed from that community (all its groups at once). Every
-  other group with a copy is handled one by one. If removing from the community fails, the bot does not try
-  its groups one by one, and the report says so.
+  other group with a copy is handled one by one. If removing from the community fails, the
+  bot does not try its groups one by one, and the report says so.
 - An admin of the group is never removed (for community removal: an admin of the community
   or of any of its groups). The bot never removes itself.
+- Groups where the user could not be removed (the bot is not an admin there, the user is an
+  admin there, or WhatsApp refused) are listed under "Could not remove the user from".
 - A copy that is already deleted, or a user who is already removed, is simply skipped.
 
 **Reports** use `@` mentions, so users and groups are tappable. If the sender is a spammer:
