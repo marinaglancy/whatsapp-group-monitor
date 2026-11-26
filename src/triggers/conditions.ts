@@ -1,4 +1,4 @@
-import { getMembership } from '../db/queries/members.js'
+import { getMembership, isAdminLevel } from '../db/queries/members.js'
 import { countUserMessagesBefore } from '../db/queries/activity.js'
 import type { TriggerCondition } from './types.js'
 
@@ -9,7 +9,7 @@ export function senderNotAdmin<C>(on: (c: C) => boolean): TriggerCondition<C> {
     check(event, config) {
       if (!on(config)) return true
       const m = getMembership(event.record.groupJid, event.record.userJid)
-      return !(m && (m.membership === 'admin' || m.membership === 'superadmin'))
+      return !isAdminLevel(m?.membership)
     },
   }
 }

@@ -5,7 +5,7 @@ import { getBotJids } from './handlers/connection.js'
 import { registerSentMessage } from '../bot/sent-registry.js'
 import { getAllGroups, getGroup } from '../db/queries/groups.js'
 import { qFindUserJid } from '../db/queries/group-tools.js'
-import { getMembership, getUserGroupMemberships } from '../db/queries/members.js'
+import { getMembership, getUserGroupMemberships, isAdminLevel } from '../db/queries/members.js'
 import { isMessageDeleted } from '../db/queries/activity.js'
 import { logger } from '../utils/logger.js'
 
@@ -169,10 +169,6 @@ export async function editGroupMessage(groupJid: string, messageId: string, text
 export type ActionResult =
   | { ok: true }
   | { ok: false; reason: 'not_admin' | 'is_admin' | 'is_bot' | 'failed'; detail?: string }
-
-function isAdminLevel(membership: string | null | undefined): boolean {
-  return membership === 'admin' || membership === 'superadmin'
-}
 
 /** From the stored group row (kept in sync by group events). */
 function botIsAdminOf(jid: string): boolean {

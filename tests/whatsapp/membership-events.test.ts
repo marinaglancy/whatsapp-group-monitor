@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import type { WASocket } from 'baileys'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedUser } from '../helpers/fixtures.js'
-import { upsertMembership, syncGroupParticipants } from '../../src/db/queries/members.js'
+import { isAdminLevel, upsertMembership, syncGroupParticipants } from '../../src/db/queries/members.js'
 import { handleGroupParticipantsUpdate } from '../../src/whatsapp/handlers/group-participants.js'
 import { getAccountDb } from '../../src/db/account.js'
 import { groupActivityLog, groupMembers } from '../../src/db/schema.js'
@@ -96,5 +96,13 @@ describe('membership events', () => {
     const left = evs[1].metadata as { actor?: string; source: string }
     expect(left.actor).toBe('admin@lid')
     expect(left.source).toBe('event')
+  })
+})
+
+describe('isAdminLevel', () => {
+  it('is true only for admin and superadmin', () => {
+    expect(isAdminLevel('admin')).toBe(true)
+    expect(isAdminLevel('superadmin')).toBe(true)
+    for (const m of ['participant', 'pending_approval', 'none', '', null, undefined]) expect(isAdminLevel(m)).toBe(false)
   })
 })

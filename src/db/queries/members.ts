@@ -41,6 +41,11 @@ function recordMembershipEvent(
   }).run()
 }
 
+/** Whether a stored membership (of a user or of the bot) is an admin one. */
+export function isAdminLevel(membership: string | null | undefined): boolean {
+  return membership === 'admin' || membership === 'superadmin'
+}
+
 export function membershipFromAdmin(admin: GroupParticipant['admin']): MembershipLevel {
   if (admin === 'superadmin') return 'superadmin'
   if (admin === 'admin') return 'admin'

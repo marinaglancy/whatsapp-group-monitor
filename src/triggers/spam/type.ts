@@ -1,4 +1,5 @@
 import { getGroup } from '../../db/queries/groups.js'
+import { isAdminLevel } from '../../db/queries/members.js'
 import { TriggerType, type BaseTriggerConfig, type DispatchCtx, type JobSpec, type TriggerCondition, type TriggerEvent } from '../types.js'
 import { fewerMessagesThan, joinedWithinDays, senderNotAdmin } from '../conditions.js'
 import { DEFAULT_SPAM_PROMPT, SPAM_DEFAULT_ERROR_TEMPLATE, SPAM_TRIGGER_DEFAULTS } from './defaults.js'
@@ -172,8 +173,7 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
     const jid = event.record.groupJid
     if (!this.selectsGroup(jid, config)) return false
     if (config.botRole === 'any') return true
-    const m = getGroup(jid)?.botMembership
-    const isAdmin = m === 'admin' || m === 'superadmin'
+    const isAdmin = isAdminLevel(getGroup(jid)?.botMembership)
     return config.botRole === 'admin' ? isAdmin : !isAdmin
   }
 

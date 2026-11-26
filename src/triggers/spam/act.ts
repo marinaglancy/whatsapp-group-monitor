@@ -1,5 +1,6 @@
 import type { SpamCaseState } from '../../db/schema.js'
 import { getAllGroups } from '../../db/queries/groups.js'
+import { isAdminLevel } from '../../db/queries/members.js'
 import type { ActionResult } from '../../whatsapp/actions.js'
 import type { SpamTriggerConfig } from './type.js'
 import { mergeState, unique, type CommunityOf } from './state.js'
@@ -27,10 +28,6 @@ type ActMessage = { groupJid: string; userJid: string; messageId: string }
 type ActConfig = Pick<SpamTriggerConfig, 'deleteSpammerCopies' | 'removeSpammer' | 'deleteSuspicious'>
 
 interface ActInput { msg: ActMessage; copies: Copy[]; spammer: boolean; config: ActConfig }
-
-function isAdminLevel(membership: string | null | undefined): boolean {
-  return membership === 'admin' || membership === 'superadmin'
-}
 
 type GroupInfo = { parentCommunityJid: string | null; botMembership: string }
 
