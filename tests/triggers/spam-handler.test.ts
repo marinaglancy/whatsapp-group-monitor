@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { setupTestDbs } from '../helpers/db.js'
 import { seedGroup, seedUser, seedMember, seedMessage, seedTenant, seedSpamTrigger } from '../helpers/fixtures.js'
@@ -27,6 +27,7 @@ import {
 import { SPAM_ANSWER_SPEC } from '../../src/triggers/spam/answer.js'
 import type { SpamTriggerConfig } from '../../src/triggers/spam/type.js'
 import { ERROR_TEXT, TriggerGoneError, TriggerJobError } from '../../src/triggers/errors.js'
+import { logger } from '../../src/utils/logger.js'
 import type { AiProvider } from '../../src/ai/provider.js'
 import type { BotJob } from '../../src/db/schema.js'
 
@@ -70,7 +71,7 @@ beforeEach(() => {
   triggerId = seedSpamTrigger(tenantId, 'rep@g.us')
   setSetting('gemini_api_key', 'sk-test')
 })
-afterEach(() => { dbs.cleanup() })
+afterEach(() => { vi.restoreAllMocks(); dbs.cleanup() })
 
 /** A copy of the spam text by the spammer, logged 10 s before the clock unless ts is given. */
 function seedCopy(groupJid: string, text = TEXT, contentType = 'conversation', ts = Math.floor(clock / 1000) - 10): string {
@@ -217,6 +218,16 @@ describe('spam_check handler: verdicts', () => {
       reportGroupJid: 'rep@g.us', reportMessageId: 'REP1', reportPostedAt: NOW_MS,
       state: { notDeleted: ['b@g.us', 'a@g.us'], deleted: [] },
     })
+  })
+
+  it('posts the report to the report group when errors go to another group', async () => {
+    seedGroup('err@g.us', 'Errors')
+    setTenantGroups(tenantId, ['a@g.us', 'b@g.us', 'c@g.us', 'd@g.us', 'rep@g.us', 'err@g.us'])
+    setConfig({ errorGroupJid: 'err@g.us' })
+    const job = copyJob('a@g.us')
+    await makeHandler(fakeProvider([verdict(true, true)]))(job)
+    expect(posts).toEqual([{ groupJid: 'rep@g.us', text: spammerText(['a']) }])
+    expect(getJobEvents(job.id).find(e => e.eventType === 'report_posted')).toMatchObject({ groupJid: 'rep@g.us' })
   })
 
   it('posts the suspicious report when the AI says spam but not a spammer', async () => {
@@ -580,6 +591,8 @@ describe('spam_check handler: stops', () => {
     setConfig({ groupsMode: 'except', groupJids: ['a@g.us'] })
     await expect(handle(copyJob('a@g.us'))).rejects.toThrow('The trigger no longer watches this group')
     setConfig({ reportGroupJid: 'a@g.us' }) // its own notification group is never checked
+    await expect(handle(copyJob('a@g.us'))).rejects.toThrow('The trigger no longer watches this group')
+    setConfig({ errorGroupJid: 'a@g.us' }) // nor its error group
     await expect(handle(copyJob('a@g.us'))).rejects.toThrow('The trigger no longer watches this group')
     setConfig({})
 
@@ -1097,6 +1110,39 @@ describe('spam errors', () => {
     const { mentions, groupMentions } = resolveMentionTokens(posts[0].text)
     expect(groupMentions).toEqual([])
     expect(mentions).not.toContain('4915550002@lid')
+  })
+
+  it('posts in the error group when one is chosen, else in the report group', async () => {
+    seedGroup('err@g.us', 'Errors')
+    setTenantGroups(tenantId, ['a@g.us', 'b@g.us', 'c@g.us', 'd@g.us', 'rep@g.us', 'err@g.us'])
+    setConfig({ errorGroupJid: 'err@g.us' })
+    const notify = notifier()
+    const first = copyJob('a@g.us')
+    await notify(first, 'no key', fail)
+    expect(posts).toEqual([{
+      groupJid: 'err@g.us',
+      text: '⚠️ Spam check failed for a message by @spammer in Alpha: the AI is not set up yet (API key missing)',
+    }])
+    expect(getJobEvents(first.id).at(-1)).toMatchObject({ eventType: 'error_sent', groupJid: 'err@g.us', messageId: 'ERR1' })
+
+    setConfig({ errorGroupJid: '' })
+    clock += 10 * 60_000
+    await notify(copyJob('b@g.us'), 'no key', fail)
+    expect(posts.map(p => p.groupJid)).toEqual(['err@g.us', 'rep@g.us'])
+  })
+
+  it('posts nothing, not even in the report group, when the error group left the tenant, and logs it', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined)
+    seedGroup('err@g.us', 'Errors')
+    setConfig({ errorGroupJid: 'err@g.us' })
+    const job = copyJob('a@g.us')
+    await notifier()(job, 'no key', fail)
+    expect(posts).toEqual([])
+    expect(getJobEvents(job.id)).toEqual([])
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, triggerId, problem: 'the error group is not in this tenant' }),
+      'Spam error not posted',
+    )
   })
 
   it('posts nothing when no notification group is chosen', async () => {

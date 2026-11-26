@@ -42,6 +42,7 @@ export const SPAM_TRIGGER_DEFAULTS: SpamTriggerConfig = {
   joinedWithinDays: null,
   maxMessages: null,
   reportGroupJid: '',
+  errorGroupJid: '',
   deleteSpammerCopies: false,
   removeSpammer: false,
   deleteSuspicious: false,

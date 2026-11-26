@@ -44,20 +44,23 @@ describe('tenants pages', () => {
     const res = await app.inject({ method: 'GET', url: '/tenants/1/triggers/new?type=spam', headers: { cookie: auth.cookie } })
     expect(res.body).toContain('draw: spamForm, read: readSpamConfig')
     expect(res.body).toContain('id="spam-groups-popup"')
-    expect(res.body).toContain('Post reports and errors to')
-    expect(res.body).toContain('Messages in this group are not checked.')
+    expect(res.body).toContain('Messages in these groups are not checked.')
   })
 
-  it('the Spam form has the three actions under "Actions", after the notification group', async () => {
+  it('the Spam form has the report and error groups, then the three actions under "Actions"', async () => {
     const res = await app.inject({ method: 'GET', url: '/tenants/1/triggers/new?type=spam', headers: { cookie: auth.cookie } })
     const labels = [
-      'Post reports and errors to:',
+      'Post reports to:</label>',
+      '<select id="s-report" style="width:300px"><option value="">Choose a group...</option>',
+      'Post errors to:</label>',
+      '<select id="s-error-group" style="width:300px"><option value="">Same group as reports</option>',
+      'Messages in these groups are not checked.',
       'When the AI says it is spam from a spammer:',
       "Delete all copies of the message in this tenant\\'s groups",
       'Remove the user (from the community, or else from the groups)',
       'When the AI says it is spam, but not from a spammer:',
       'Delete the message',
-      'Error message (posted in the group above)',
+      'Error message (posted in the errors group)',
     ]
     const at = labels.map(l => res.body.indexOf(l))
     expect(at.every(i => i > 0)).toBe(true)
@@ -66,6 +69,12 @@ describe('tenants pages', () => {
       expect(res.body).toContain(`chk('${id}', cfg.${key}, `)
       expect(res.body).toContain(`${key}: on('${id}')`)
     }
+    // both selects list the tenant's groups the same way, with a saved group that left the tenant shown
+    expect(res.body).toContain("groupOptions(groups, cfg.reportGroupJid, groupNames)")
+    expect(res.body).toContain("groupOptions(groups, cfg.errorGroupJid, groupNames)")
+    expect(res.body).toContain("reportGroupJid: val('s-report')")
+    expect(res.body).toContain("errorGroupJid: val('s-error-group')")
+    expect(res.body).not.toContain('Post reports and errors to')
   })
 
   it('drops watched groups that left the tenant and words the note for one or many', () => {

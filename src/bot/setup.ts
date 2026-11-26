@@ -163,7 +163,7 @@ export function setupBot(overrides: BotOverrides = {}): void {
     nowMs: deps.nowMs,
   }
   registerJobHandler('spam_check', createSpamHandler(spamDeps), {
-    // errors go to the notification group, at most once every 10 minutes per trigger
+    // errors go to the error group (or else the notification group), at most once every 10 minutes per trigger
     onFailure: buildTriggerErrorNotifier(spamErrorTarget(spamDeps.post)),
     shouldRetry: shouldRetryAiJob,
   })

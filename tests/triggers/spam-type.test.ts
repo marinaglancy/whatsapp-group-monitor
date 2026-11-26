@@ -27,7 +27,8 @@ beforeEach(() => {
   seedGroup('a@g.us', 'A', { botMembership: 'admin' })
   seedGroup('b@g.us', 'B', { botMembership: 'participant' })
   seedGroup('rep@g.us', 'Reports')
-  tenantId = seedTenant('T', ['a@g.us', 'b@g.us', 'rep@g.us'])
+  seedGroup('err@g.us', 'Errors')
+  tenantId = seedTenant('T', ['a@g.us', 'b@g.us', 'rep@g.us', 'err@g.us'])
 })
 afterEach(() => { dbs.cleanup() })
 
@@ -152,6 +153,17 @@ describe('Spam trigger type', () => {
     expect(run(record({ groupJid: 'b@g.us' }))).toHaveLength(1)
   })
 
+  it('never watches its own error group', () => {
+    const e = (g: string) => ev(record({ groupJid: g }))
+    expect(spamTriggerType.watches(e('err@g.us'), cfg({ errorGroupJid: 'err@g.us' }))).toBe(false)
+    expect(spamTriggerType.watches(e('err@g.us'), cfg({ errorGroupJid: 'err@g.us', groupsMode: 'only', groupJids: ['err@g.us'] }))).toBe(false)
+    expect(spamTriggerType.watches(e('err@g.us'), cfg())).toBe(true)
+    // the dispatcher makes no job for a message there
+    seedSpamTrigger(tenantId, 'rep@g.us', { config: { errorGroupJid: 'err@g.us' } })
+    expect(run(record({ groupJid: 'err@g.us' }))).toEqual([])
+    expect(run(record({ groupJid: 'b@g.us' }))).toHaveLength(1)
+  })
+
   it('watches by bot role (admin includes superadmin)', () => {
     const e = (g: string) => ev(record({ groupJid: g }))
     expect(spamTriggerType.watches(e('a@g.us'), cfg({ botRole: 'admin' }))).toBe(true)
@@ -208,6 +220,20 @@ describe('Spam trigger type', () => {
     expect(ok({ errorTemplate: 'x'.repeat(1_001) })).toBe(false)
   })
 
+  it('posts errors to the report group unless an error group in the tenant is chosen', () => {
+    expect(spamTriggerType.defaults().errorGroupJid).toBe('')
+    // a trigger saved before the error group existed
+    expect(spamTriggerType.normalize({ reportGroupJid: 'rep@g.us' }).errorGroupJid).toBe('')
+    const ctx = { coveredGroupJids: ['a@g.us', 'rep@g.us', 'err@g.us'] }
+    const result = (over: Record<string, unknown>) => spamTriggerType.validate({ reportGroupJid: 'rep@g.us', ...over }, ctx)
+    expect(result({ errorGroupJid: '' })).toMatchObject({ ok: true, config: { errorGroupJid: '' } })
+    expect(result({ errorGroupJid: 'err@g.us' })).toMatchObject({ ok: true, config: { reportGroupJid: 'rep@g.us', errorGroupJid: 'err@g.us' } })
+    expect(result({ errorGroupJid: 'rep@g.us' })).toMatchObject({ ok: true, config: { errorGroupJid: 'rep@g.us' } })
+    expect(result({ errorGroupJid: 'out@g.us' })).toEqual({ ok: false, error: 'Choose an error group in this tenant' })
+    expect(result({ errorGroupJid: 5 })).toEqual({ ok: false, error: 'Choose an error group in this tenant' })
+    expect(result({ errorGroupJid: null })).toEqual({ ok: false, error: 'Choose an error group in this tenant' })
+  })
+
   it('validate refuses a regex over 200 characters and an invalid regex', () => {
     const ctx = { coveredGroupJids: ['rep@g.us'] }
     const ok = (contentRegex: string) => spamTriggerType.validate({ reportGroupJid: 'rep@g.us', contentRegex }, ctx).ok
@@ -258,5 +284,18 @@ describe('Spam trigger type', () => {
     expect(spamTriggerType.warning(cfg(), ['rep@g.us'])).toBeNull()
     expect(spamTriggerType.warning(cfg({ reportGroupJid: '' }), ['rep@g.us'])).toBe('Choose a notification group in this tenant')
     expect(spamTriggerType.warning(cfg(), ['a@g.us'])).toBe('Choose a notification group in this tenant')
+  })
+
+  it('summarize names the error group only when it is not the report group; warning when it left the tenant', () => {
+    const name = (j: string) => ({ 'rep@g.us': 'Reports', 'err@g.us': 'Errors' } as Record<string, string>)[j] ?? j
+    expect(spamTriggerType.summarize(cfg({ waitSeconds: 0, errorGroupJid: 'err@g.us' }), name))
+      .toBe('all groups · reports to Reports · errors to Errors')
+    expect(spamTriggerType.summarize(cfg({ waitSeconds: 0, errorGroupJid: 'rep@g.us' }), name)).toBe('all groups · reports to Reports')
+    expect(spamTriggerType.summarize(cfg({ waitSeconds: 0, errorGroupJid: '' }), name)).toBe('all groups · reports to Reports')
+    expect(spamTriggerType.warning(cfg({ errorGroupJid: 'err@g.us' }), ['rep@g.us', 'err@g.us'])).toBeNull()
+    expect(spamTriggerType.warning(cfg({ errorGroupJid: '' }), ['rep@g.us'])).toBeNull()
+    expect(spamTriggerType.warning(cfg({ errorGroupJid: 'err@g.us' }), ['rep@g.us'])).toBe('The error group is not in this tenant')
+    // the report group comes first
+    expect(spamTriggerType.warning(cfg({ errorGroupJid: 'err@g.us' }), ['a@g.us'])).toBe('Choose a notification group in this tenant')
   })
 })

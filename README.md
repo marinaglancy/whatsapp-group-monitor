@@ -196,9 +196,11 @@ Add it with **+ Add trigger** and choose **Spam**. The settings:
 - **Timing**: the bot waits 10 seconds before checking (so a quick delete or a copy of the
   same text in other groups can be seen first), and ignores messages older than 60 minutes.
   Both can be changed.
-- **Post reports and errors to**: the notification group. It must be one of the tenant's
-  groups. Reports and error messages are posted there. Messages in this group are not
-  checked.
+- **Post reports to**: the group where reports are posted. It must be one of the tenant's
+  groups.
+- **Post errors to**: the group where error messages are posted. By default ("Same group as
+  reports") they go to the reports group. You can choose another of the tenant's groups.
+  Messages in the reports group and in the errors group are not checked.
 - **Actions**: all off by default.
   - When the AI says it is spam from a spammer: "Delete all copies of the message in this
     tenant's groups" and "Remove the user (from the community, or else from the groups)".
@@ -281,7 +283,7 @@ Messages without text are never merged. If editing would lose the tappable group
 a new report is posted instead.
 
 Errors (for example the AI is busy or the daily limit is reached) are posted to the
-notification group at most once every 10 minutes per trigger; the rest only go to the job
+errors group at most once every 10 minutes per trigger; the rest only go to the job
 log. Every check is a `spam_check` job on the **Bot jobs** page, with the AI's verdict in
 its log. The job log also shows what was deleted or removed, and why something was not. As with Mentions, the text of checked messages is sent to the Gemini API (see the
 privacy note above).

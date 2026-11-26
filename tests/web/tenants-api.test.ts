@@ -242,6 +242,41 @@ describe('tenants api', () => {
       .toMatchObject({ deleteSpammerCopies: false, removeSpammer: false, deleteSuspicious: false })
   })
 
+  it('saves the Spam error group, refuses one outside the tenant, and reads an older trigger as "same group as reports"', async () => {
+    seedGroup('a@g.us', 'A')
+    seedGroup('b@g.us', 'B')
+    seedGroup('out@g.us', 'Out')
+    const t = seedTenant('One', ['a@g.us', 'b@g.us'])
+    const config = { ...SPAM_TRIGGER_DEFAULTS, reportGroupJid: 'a@g.us' }
+    const created = await call('POST', `/api/tenants/${t}/triggers`, {
+      type: 'spam', name: 'S', enabled: true, config: { ...config, errorGroupJid: 'b@g.us' },
+    })
+    expect(created.statusCode).toBe(200)
+    const id = created.json().id as number
+    expect((await call('GET', `/api/triggers/${id}`)).json().trigger.config)
+      .toMatchObject({ reportGroupJid: 'a@g.us', errorGroupJid: 'b@g.us' })
+
+    const outside = await call('PUT', `/api/triggers/${id}`, { name: 'S', enabled: true, config: { ...config, errorGroupJid: 'out@g.us' } })
+    expect(outside.statusCode).toBe(400)
+    expect(outside.json().error).toBe('Choose an error group in this tenant')
+    expect(getTrigger(id)!.config).toMatchObject({ reportGroupJid: 'a@g.us', errorGroupJid: 'b@g.us' })
+
+    const same = await call('PUT', `/api/triggers/${id}`, { name: 'S', enabled: true, config: { ...config, errorGroupJid: '' } })
+    expect(same.json()).toEqual({ ok: true })
+    expect(getTrigger(id)!.config).toMatchObject({ errorGroupJid: '' })
+
+    // saved before the error group existed
+    const { errorGroupJid: _e, ...older } = config
+    const oldId = seedSpamTrigger(t, 'a@g.us')
+    updateTrigger(oldId, { config: older })
+    expect(getTrigger(oldId)!.config).not.toHaveProperty('errorGroupJid')
+    expect((await call('GET', `/api/triggers/${oldId}`)).json().trigger.config).toMatchObject({ errorGroupJid: '' })
+
+    // an error group that left the tenant is named, so the page can show it
+    updateTrigger(oldId, { config: { ...config, errorGroupJid: 'out@g.us' } })
+    expect((await call('GET', `/api/triggers/${oldId}`)).json().groupNames).toEqual({ 'a@g.us': 'A', 'out@g.us': 'Out' })
+  })
+
   it('rejects a bad Spam config with the validate message', async () => {
     seedGroup('a@g.us', 'A')
     seedGroup('out@g.us', 'Out')

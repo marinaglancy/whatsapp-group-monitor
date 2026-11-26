@@ -17,6 +17,8 @@ export interface SpamTriggerConfig extends BaseTriggerConfig {
   joinedWithinDays: number | null
   maxMessages: number | null
   reportGroupJid: string
+  /** Where errors are posted; '' = the report group. */
+  errorGroupJid: string
   /** Spammer verdict: delete every copy found. */
   deleteSpammerCopies: boolean
   /** Spammer verdict: remove the user from the community, or else from the groups. */
@@ -102,6 +104,9 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
     if (typeof c.reportGroupJid !== 'string' || !ctx.coveredGroupJids.includes(c.reportGroupJid)) {
       return fail('Choose a notification group in this tenant')
     }
+    if (typeof c.errorGroupJid !== 'string' || (c.errorGroupJid && !ctx.coveredGroupJids.includes(c.errorGroupJid))) {
+      return fail('Choose an error group in this tenant')
+    }
     if (!['all', 'only', 'except'].includes(c.groupsMode)) return fail('Invalid groups setting')
     if (!Array.isArray(c.groupJids) || !c.groupJids.every(j => typeof j === 'string' && ctx.coveredGroupJids.includes(j))) {
       return fail('Pick groups that belong to this tenant')
@@ -144,6 +149,7 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
     const scope = config.groupsMode === 'all' ? 'all groups'
       : config.groupsMode === 'only' ? `only ${n} ${plural}` : `except ${n} ${plural}`
     let text = `${scope} · reports to ${groupName(config.reportGroupJid)}`
+    if (config.errorGroupJid && config.errorGroupJid !== config.reportGroupJid) text += ` · errors to ${groupName(config.errorGroupJid)}`
     if (config.botRole === 'admin') text += ' · admin groups only'
     else if (config.botRole === 'not_admin') text += ' · non-admin groups only'
     if (config.onlyIfFirst) text += ' · only if no earlier trigger fired'
@@ -155,13 +161,15 @@ export class SpamTriggerType extends TriggerType<SpamTriggerConfig> {
   }
 
   warning(config: SpamTriggerConfig, coveredGroupJids: string[]): string | null {
-    return coveredGroupJids.includes(config.reportGroupJid) ? null : 'Choose a notification group in this tenant'
+    if (!coveredGroupJids.includes(config.reportGroupJid)) return 'Choose a notification group in this tenant'
+    if (config.errorGroupJid && !coveredGroupJids.includes(config.errorGroupJid)) return 'The error group is not in this tenant'
+    return null
   }
 
-  /** Whether the groups setting picks the group. The notification group is
-   *  never checked: people there discuss the reports. */
+  /** Whether the groups setting picks the group. The report and error groups
+   *  are never checked: people there discuss the reports and errors. */
   selectsGroup(jid: string, config: SpamTriggerConfig): boolean {
-    if (jid === config.reportGroupJid) return false
+    if (jid === config.reportGroupJid || jid === config.errorGroupJid) return false
     if (config.groupsMode === 'only' && !config.groupJids.includes(jid)) return false
     if (config.groupsMode === 'except' && config.groupJids.includes(jid)) return false
     return true
