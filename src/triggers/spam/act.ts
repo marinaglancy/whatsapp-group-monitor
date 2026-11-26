@@ -2,7 +2,7 @@ import type { SpamCaseState } from '../../db/schema.js'
 import { getAllGroups } from '../../db/queries/groups.js'
 import type { ActionResult } from '../../whatsapp/actions.js'
 import type { SpamTriggerConfig } from './type.js'
-import { mergeState, unique } from './state.js'
+import { mergeState, unique, type CommunityOf } from './state.js'
 
 /** The WhatsApp actions a spam job can take, injected so tests can fake them. */
 export interface SpamActions {
@@ -32,6 +32,18 @@ function isAdminLevel(membership: string | null | undefined): boolean {
   return membership === 'admin' || membership === 'superadmin'
 }
 
+type GroupInfo = { parentCommunityJid: string | null; botMembership: string }
+
+/** Each stored group's community and the bot's role there. */
+function groupInfo(): Map<string, GroupInfo> {
+  return new Map(getAllGroups().map(g => [g.jid, g]))
+}
+
+/** The community of each stored group, for mergeState. */
+export function communityLookup(groups: Map<string, GroupInfo> = groupInfo()): CommunityOf {
+  return groupJid => groups.get(groupJid)?.parentCommunityJid ?? null
+}
+
 /** Act on a spam verdict with the actions ticked for it (spec §6.3), and
  *  return what the report lists. A spammer's copies are all deleted; for a
  *  suspicious message only this job's own one, as each copy has its own job.
@@ -55,24 +67,30 @@ export async function act(
     if (r && !r.ok) notDone.push({ action: 'delete', jid: c.groupJid, reason: r.reason, detail: r.detail })
   }
   const removing = spammer && config.removeSpammer
-  if (removing) await removeSpammer(deps, msg, copies, state, notDone)
-  return { state: mergeState(null, state), notDone, tried: toDelete.length > 0 || removing }
+  const groups = groupInfo()
+  if (removing) await removeSpammer(deps, msg, copies, groups, state, notDone)
+  return { state: mergeState(null, state, communityLookup(groups)), notDone, tried: toDelete.length > 0 || removing }
 }
 
-/** Remove a spammer (spec §6.4): from the community of the message's group
- *  when the bot is an admin of it, and from every other group with a copy
- *  (every one of them when the community is not used). A group where the
- *  user stays (an admin there, the bot is not an admin, or WhatsApp
- *  refused) is listed as not removed. */
+/** Remove a spammer (spec §6.4, ruling R17b): from one community the bot
+ *  administers — the one of the message's group, else the one of the oldest
+ *  copy in such a community — and from every other group with a copy, one by
+ *  one. A failed community removal does not fall back to its groups (R17a).
+ *  A group where the user stays (an admin there, the bot is not an admin, or
+ *  WhatsApp refused) is listed as not removed. copies are oldest first. */
 async function removeSpammer(
-  deps: SpamActions, msg: ActMessage, copies: Copy[], state: SpamCaseState, notDone: NotDone[],
+  deps: SpamActions, msg: ActMessage, copies: Copy[], groups: Map<string, GroupInfo>,
+  state: SpamCaseState, notDone: NotDone[],
 ): Promise<void> {
-  const groups = new Map(getAllGroups().map(g => [g.jid, g]))
-  const parent = groups.get(msg.groupJid)?.parentCommunityJid ?? null
-  const community = parent && isAdminLevel(groups.get(parent)?.botMembership) ? parent : null
+  const administered = (groupJid: string): string | null => {
+    const parent = groups.get(groupJid)?.parentCommunityJid ?? null
+    return parent && isAdminLevel(groups.get(parent)?.botMembership) ? parent : null
+  }
+  const community = administered(msg.groupJid) ?? copies.map(c => administered(c.groupJid)).find(j => j !== null) ?? null
   if (community) {
     const r = await deps.removeFromCommunity(community, msg.userJid)
     state.community = r.ok ? 'removed' : 'not_removed'
+    state.communityJid = community
     if (!r.ok) notDone.push({ action: 'remove', jid: community, reason: r.reason, detail: r.detail })
   }
   for (const groupJid of unique(copies.map(c => c.groupJid))) {

@@ -126,14 +126,16 @@ export type BotJob = typeof botJobs.$inferSelect
 export interface SpamVerdict { isspam?: boolean; isspammer?: boolean; reason?: string }
 /** What a case's report lists, as group jids: where the copies were deleted
  *  or not, where the user was removed or not, and the community removal
- *  (absent when none was tried). Rows saved before the removal lists existed
- *  lack them: findRecentCase and getCase fill them in. */
+ *  (absent when none was tried) with the community's jid. Rows saved before
+ *  the removal lists existed lack them: findRecentCase and getCase fill them in. */
 export interface SpamCaseState {
   notDeleted: string[]
   deleted: string[]
   removedFrom: string[]
   notRemovedFrom: string[]
   community?: 'removed' | 'not_removed'
+  /** The community the status in `community` is about; missing in older rows. */
+  communityJid?: string
 }
 
 /** One verdict per (trigger, user, normalized text); also remembers the report message to edit. */

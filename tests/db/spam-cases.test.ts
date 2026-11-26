@@ -25,7 +25,10 @@ describe('spam cases', () => {
   })
   it('stores the report and its state', () => {
     const id = createCase({ triggerId: 1, userJid: 'u@lid', textKey: 'k', verdict: { isspam: true } })
-    const state = { notDeleted: ['a@g.us'], deleted: ['b@g.us'], removedFrom: ['b@g.us'], notRemovedFrom: ['a@g.us'], community: 'removed' as const }
+    const state = {
+      notDeleted: ['a@g.us'], deleted: ['b@g.us'], removedFrom: ['b@g.us'], notRemovedFrom: ['a@g.us'],
+      community: 'removed' as const, communityJid: 'com@g.us',
+    }
     updateCaseReport(id, { reportGroupJid: 'n@g.us', reportMessageId: 'R1', reportPostedAt: 5, state })
     const c = findRecentCase(1, 'u@lid', 'k', 0)!
     expect(c.reportMessageId).toBe('R1')
@@ -43,7 +46,7 @@ describe('spam cases', () => {
     const full = { notDeleted: ['a@g.us'], deleted: [], removedFrom: [], notRemovedFrom: [] }
     expect(findRecentCase(1, 'u@lid', 'k', 0)!.state).toEqual(full)
     expect(getCase(id)!.state).toEqual(full)
-    expect(fullCaseState({ notDeleted: ['a@g.us', 3], community: 'maybe', junk: 1 })).toEqual(full)
+    expect(fullCaseState({ notDeleted: ['a@g.us', 3], community: 'maybe', communityJid: 5, junk: 1 })).toEqual(full)
   })
 })
 

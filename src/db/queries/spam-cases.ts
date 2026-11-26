@@ -17,6 +17,7 @@ export function fullCaseState(raw: unknown): SpamCaseState {
     notRemovedFrom: strings(s.notRemovedFrom),
   }
   if (s.community === 'removed' || s.community === 'not_removed') state.community = s.community
+  if (typeof s.communityJid === 'string') state.communityJid = s.communityJid
   return state
 }
 

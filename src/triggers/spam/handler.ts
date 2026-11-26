@@ -8,7 +8,7 @@ import { spamTriggerType, type SpamTriggerConfig } from './type.js'
 import { SPAM_COPY_WINDOW_MS, SPAM_EDIT_WINDOW_MS, SPAM_REUSE_WINDOW_MS } from './defaults.js'
 import { SPAM_ANSWER_SPEC } from './answer.js'
 import { normalizeText, removalLines, spammerReport, suspiciousReport } from './report.js'
-import { act, type Copy, type SpamActions } from './act.js'
+import { act, communityLookup, type Copy, type SpamActions } from './act.js'
 import { mergeState, sameState } from './state.js'
 import { resolveTenantScope, type QaScope } from '../../bot/scope.js'
 import type { JobHandler } from '../../bot/worker.js'
@@ -358,7 +358,7 @@ async function postOrEditReport(
   job: BotJob, deps: SpamDeps, now: () => number, r: ReportInput,
 ): Promise<{ report: 'posted' | 'edited' | 'unchanged'; reportMessageId: string }> {
   const { earlier, reportGroupJid } = r
-  const state = mergeState(earlier?.state ?? null, r.fresh)
+  const state = mergeState(earlier?.state ?? null, r.fresh, communityLookup())
   if (earlier && sameState(state, earlier.state)) return { report: 'unchanged', reportMessageId: earlier.messageId }
   // the tenant may have changed while the AI was judging
   checkReportGroup(r.tenantId, reportGroupJid)

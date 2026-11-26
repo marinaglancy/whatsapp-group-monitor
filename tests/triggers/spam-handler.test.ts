@@ -800,11 +800,17 @@ describe('spam_check handler: acting on the verdict (phase 2)', () => {
       removal: ['User removed from: @a', 'Could not remove the user from: @b, @c'],
     })])
     expect(eventTypes(job)).toEqual(['ai_call', 'spam_actions', 'report_posted'])
+    // why each removal did not happen is kept in the job log
+    expect(getJobEvents(job.id)[1].data!.notDone).toEqual([
+      { action: 'remove', jid: 'b@g.us', reason: 'is_admin' },
+      { action: 'remove', jid: 'c@g.us', reason: 'not_admin' },
+    ])
     expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)!.state)
       .toEqual({ notDeleted: ['a@g.us', 'b@g.us', 'c@g.us'], deleted: [], removedFrom: ['a@g.us'], notRemovedFrom: ['b@g.us', 'c@g.us'] })
   })
 
   describe('in a community', () => {
+    let cbCopy: string
     beforeEach(() => {
       seedGroup('com@g.us', 'Community', { isCommunity: true, botMembership: 'admin' })
       seedGroup('ca@g.us', 'Community A', { parentCommunityJid: 'com@g.us' })
@@ -812,7 +818,7 @@ describe('spam_check handler: acting on the verdict (phase 2)', () => {
       setTenantGroups(tenantId, ['com@g.us', 'a@g.us', 'b@g.us', 'c@g.us', 'd@g.us', 'rep@g.us'])
       admin('c@g.us')
       setConfig({ removeSpammer: true })
-      seedCopy('cb@g.us')
+      cbCopy = seedCopy('cb@g.us')
       seedCopy('c@g.us')
     })
 
@@ -824,7 +830,7 @@ describe('spam_check handler: acting on the verdict (phase 2)', () => {
         removal: ['User removed from the community', 'User removed from: @c'],
       })])
       expect(findRecentCase(triggerId, SPAMMER, normalizeText(TEXT), 0)!.state)
-        .toMatchObject({ community: 'removed', removedFrom: ['c@g.us'], notRemovedFrom: [] })
+        .toMatchObject({ community: 'removed', communityJid: 'com@g.us', removedFrom: ['c@g.us'], notRemovedFrom: [] })
     })
 
     it('says the user is not removed from the community when it refuses, and leaves its groups to it', async () => {
@@ -847,10 +853,81 @@ describe('spam_check handler: acting on the verdict (phase 2)', () => {
       expect(posts[0].text).not.toContain('community')
     })
 
-    it('removes from each group when the message\'s group is not in the community', async () => {
+    it('removes from the community when a copy is in it, even if the message\'s group is not (R17b)', async () => {
       await makeHandler(fakeProvider([verdict(true, true)]))(copyJob('c@g.us', TEXT))
-      expect(actions.some(a => a.includes('community'))).toBe(false)
-      expect(actions).toContain('remove spammer@lid from cb@g.us')
+      expect(actions).toEqual(['remove spammer@lid from community com@g.us', 'remove spammer@lid from c@g.us'])
+      expect(posts[0].text).toContain('\n\nUser removed from the community\nUser removed from: @c\n\n')
+    })
+
+    it('first copy outside the community, second inside: job 1 removes from the community, and the outside group one by one (R17b)', async () => {
+      admin('cb@g.us')
+      setConfig({ deleteSpammerCopies: true, removeSpammer: true })
+      const first = makeJob('c@g.us', seedCopy('c@g.us', TEXT, 'conversation', NOW_S - 60))
+      const handle = makeHandler(fakeProvider([verdict(true, true)]))
+      await handle(first)
+      expect(actions.filter(a => a.startsWith('remove')))
+        .toEqual(['remove spammer@lid from community com@g.us', 'remove spammer@lid from c@g.us'])
+      expect(posts.map(p => p.text)).toEqual([fullSpammerText({
+        deleted: ['c', 'cb'],
+        removal: ['User removed from the community', 'User removed from: @c'],
+      })])
+
+      // the job for the community copy finds it deleted: the community removal did not wait for it
+      clock += 2_000
+      expect(await handle(makeJob('cb@g.us', cbCopy))).toEqual({ note: 'already deleted' })
+    })
+
+    it('takes the community of the message\'s group first, else the oldest copy\'s community the bot administers (R17b)', async () => {
+      seedGroup('com2@g.us', 'Community 2', { isCommunity: true, botMembership: 'admin' })
+      seedGroup('xa@g.us', 'Other A', { parentCommunityJid: 'com2@g.us', botMembership: 'admin' })
+      seedGroup('com3@g.us', 'Community 3', { isCommunity: true, botMembership: 'participant' })
+      seedGroup('ya@g.us', 'Third A', { parentCommunityJid: 'com3@g.us' })
+      setTenantGroups(tenantId, ['com@g.us', 'com2@g.us', 'com3@g.us', 'a@g.us', 'b@g.us', 'c@g.us', 'd@g.us', 'rep@g.us'])
+      // oldest: a copy in com3, which the bot does not administer
+      seedCopy('ya@g.us', TEXT, 'conversation', NOW_S - 120)
+      seedCopy('xa@g.us', TEXT, 'conversation', NOW_S - 30)
+      const handle = makeHandler(fakeProvider([verdict(true, true), verdict(true, true)]))
+
+      // the message's group is in com2: com2, although com's copy (cb) is older
+      await handle(copyJob('xa@g.us'))
+      expect(actions).toEqual([
+        'remove spammer@lid from community com2@g.us',
+        'remove spammer@lid from ya@g.us',
+        'remove spammer@lid from c@g.us',
+        'remove spammer@lid from cb@g.us',
+      ])
+
+      // the message's group is in no community: the oldest copy is in com3, which the bot
+      // does not administer, so the next one decides (com)
+      actions = []
+      const other = 'Another ad https://x.y/other'
+      seedCopy('ya@g.us', other, 'conversation', NOW_S - 120)
+      seedCopy('xa@g.us', other, 'conversation', NOW_S - 90)
+      seedCopy('cb@g.us', other, 'conversation', NOW_S - 60)
+      updateBotMembership('com2@g.us', 'participant')
+      await handle(copyJob('c@g.us', other))
+      expect(actions).toEqual([
+        'remove spammer@lid from community com@g.us',
+        'remove spammer@lid from ya@g.us',
+        'remove spammer@lid from xa@g.us',
+        'remove spammer@lid from c@g.us',
+      ])
+    })
+
+    it('a later job that removes from the community clears its groups from "Could not remove" (R17b)', async () => {
+      updateBotMembership('com@g.us', 'participant')
+      const handle = makeHandler(fakeProvider([verdict(true, true)]))
+      await handle(copyJob('ca@g.us'))
+      expect(posts[0].text).toContain('\n\nUser removed from: @c\nCould not remove the user from: @ca, @cb\n\n')
+
+      admin('com@g.us') // the bot was made a community admin
+      clock += 30_000
+      await handle(copyJob('cb@g.us')) // a new copy
+      expect(actions.slice(-2)).toEqual(['remove spammer@lid from community com@g.us', 'remove spammer@lid from c@g.us'])
+      expect(edits.map(e => e.text)).toEqual([fullSpammerText({
+        notDeleted: ['c', 'ca', 'cb'],
+        removal: ['User removed from the community', 'User removed from: @c'],
+      })])
     })
 
     it('"removed from the community" wins over an earlier refusal when a later job succeeds', async () => {

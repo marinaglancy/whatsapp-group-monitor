@@ -215,11 +215,10 @@ is posted.
 **Deleting and removing** rules:
 
 - The bot can only delete messages or remove users in groups where it is an admin.
-- If the message's group is in a community where the bot is a community admin, the user is
-  removed from the community (all its groups at once). Otherwise the user is removed from
-  each group where a copy was found and the bot is an admin. Groups outside that community
-  are handled one by one. If removing from the community fails, the bot does not try its
-  groups one by one, and the report says so.
+- If the message or one of its copies was posted in a community where the bot is a
+  community admin, the user is removed from that community (all its groups at once). Every
+  other group with a copy is handled one by one. If removing from the community fails, the bot does not try
+  its groups one by one, and the report says so.
 - An admin of the group is never removed (for community removal: an admin of the community
   or of any of its groups). The bot never removes itself.
 - A copy that is already deleted, or a user who is already removed, is simply skipped.
